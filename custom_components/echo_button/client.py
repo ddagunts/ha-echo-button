@@ -7,7 +7,7 @@ from collections.abc import Callable, Coroutine
 
 from dbus_fast.errors import DBusError
 
-from .bluez import BluezError, device_path
+from .bluez import BLUEZ_ERRORS, device_path
 from .link import BluezLink
 from .protocol import (
     ESC,
@@ -73,8 +73,8 @@ class EchoButtonClient:
         self._pressed_at: float | None = None
         self._dev_path: str | None = None
         self._base_color: Color | None = None  # steady LED color, None = off
-        self._restore_timer: asyncio.TimerHandle | None = None
-        self._refresh_timer: asyncio.TimerHandle | None = None
+        self._base_timer: asyncio.TimerHandle | None = None  # sends the steady color again
+        self._led_commands = 0  # LED commands sent so far; lets a late resend see it was overtaken
         self._tasks: set[asyncio.Task] = set()
 
     def add_listener(self, callback: Callable[[str], None]) -> Callable[[], None]:
@@ -111,39 +111,56 @@ class EchoButtonClient:
         the animation can't be encoded.
         """
         data = encode_set_light(steps, repeat)
-        self._cancel_timer("_restore_timer")
         await self._send(MSG_SET_LIGHT, data)
-        if self._base_color is not None:
-            seconds = sum(step.duration_ms for step in steps) * repeat / 1000
-            self._restore_timer = asyncio.get_running_loop().call_later(
-                seconds, lambda: self._spawn(self._apply_base_quietly()))
+        self._sent_light(sum(step.duration_ms for step in steps) * repeat / 1000)
 
     async def set_base_light(self, color: Color | None) -> None:
         """Set the steady LED color (None = off). Kept across reconnects; sent now if connected."""
         self._base_color = None if color == OFF else color
-        self._cancel_timer("_restore_timer")
         if self._fd is not None:
             await self._apply_base()
 
     async def _apply_base(self) -> None:
-        self._cancel_timer("_refresh_timer")
         if self._base_color is None:
-            await self._send(MSG_SET_LIGHT, encode_set_light([LightStep(1, OFF)]))
-            return
-        await self._send(MSG_SET_LIGHT, encode_set_light([LightStep(MAX_STEP_MS, self._base_color)], MAX_REPEAT))
-        self._refresh_timer = asyncio.get_running_loop().call_later(
-            BASE_LIGHT_REFRESH_SECONDS, lambda: self._spawn(self._apply_base_quietly()))
+            steps, repeat = [LightStep(1, OFF)], 1
+        else:
+            steps, repeat = [LightStep(MAX_STEP_MS, self._base_color)], MAX_REPEAT
+        await self._send(MSG_SET_LIGHT, encode_set_light(steps, repeat))
+        self._sent_light(BASE_LIGHT_REFRESH_SECONDS)
 
-    async def _apply_base_quietly(self) -> None:
+    def _sent_light(self, seconds: float) -> None:
+        """After each LED command that went out: send the steady color again in `seconds`.
+
+        Each command replaces whatever the LED was showing, so one timer covers both
+        coming back after an animation and refreshing the steady color before it
+        runs out. If a send fails, the timer of the command that is still playing
+        stays as it was. With the steady light off there is nothing to resend: the
+        LED goes dark by itself when an animation ends.
+        """
+        self._cancel_base_timer()
+        self._led_commands += 1
+        if self._base_color is not None:
+            sent = self._led_commands
+            self._base_timer = asyncio.get_running_loop().call_later(
+                seconds, lambda: self._spawn(self._resend_base(sent)))
+
+    def _restore_base_soon(self) -> None:
+        """On (re)connect: send the steady color, unless another LED command gets there first."""
+        if self._base_color is not None:
+            self._spawn(self._resend_base(self._led_commands))
+
+    async def _resend_base(self, sent: int) -> None:
+        if sent != self._led_commands:
+            return  # an animation went out since; its own timer brings the steady color back
         try:
             await self._apply_base()
         except (NotConnectedError, OSError, TimeoutError) as err:
             self._log.debug("Echo Button %s: could not restore LED: %s", self.address, err)
 
-    def _cancel_timer(self, name: str) -> None:
-        if (timer := getattr(self, name)) is not None:
-            timer.cancel()
-            setattr(self, name, None)
+    def _cancel_base_timer(self) -> None:
+        if self._base_timer is not None:
+            self._base_timer.cancel()
+            self._base_timer = None
 
     async def _send(self, msg_type: int, data: bytes) -> None:
         if self._fd is None:
@@ -188,12 +205,11 @@ class EchoButtonClient:
             while True:
                 try:
                     await self._run_once()
-                except (BluezError, DBusError, OSError, EOFError) as err:
+                except BLUEZ_ERRORS as err:
                     self._log.warning("Echo Button %s: Bluetooth problem (%s); retrying in 30 s", self.address, err)
                     await asyncio.sleep(30)
         finally:
-            self._cancel_timer("_restore_timer")
-            self._cancel_timer("_refresh_timer")
+            self._cancel_base_timer()
             for task in list(self._tasks):
                 task.cancel()
 
@@ -250,8 +266,10 @@ class EchoButtonClient:
         self._fd = fd
         self._log.info("Connected to Echo Button %s", self.address)
         self._set_connected(True)
-        if self._base_color is not None:
-            self._spawn(self._apply_base_quietly())  # waits for the serial in the connect burst
+        if self.serial is not None:
+            self._restore_base_soon()
+        # else: commands need the button's serial, so _handle sends the steady color
+        # once the button's first message brings it.
         parser = FrameParser()
         try:
             while data := await chunks.get():
@@ -265,14 +283,16 @@ class EchoButtonClient:
             os.close(fd)
             self._chunks = None
             self._pressed_at = None
-            self._cancel_timer("_restore_timer")
-            self._cancel_timer("_refresh_timer")
+            self._cancel_base_timer()
             self._set_connected(False)
 
     def _handle(self, message: GadgetMessage, now: float) -> None:
         if message.serial:
+            first = self.serial is None
             self.serial = message.serial
             self._serial_seen.set()
+            if first and self._fd is not None:
+                self._restore_base_soon()
         if message.type == MSG_STATUS:
             self.last_status = message.data
         elif message.type == MSG_CAPABILITIES:

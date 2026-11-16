@@ -14,6 +14,7 @@ from echo_button.protocol import (
     encode_message,
     encode_set_light,
     fade_steps,
+    parse_color,
     parse_message,
 )
 
@@ -114,3 +115,24 @@ def test_fade_steps():
     assert steps[-1].color == (160, 0, 255)
     assert not any(s.blend for s in steps)
     assert fade_steps((0, 0, 0), (9, 9, 9), 3, count=16)[-1].color == (9, 9, 9)  # short fades shrink the count
+
+
+@pytest.mark.parametrize(("value", "color"), [
+    ("#ff8800", (255, 136, 0)),
+    (" FF8800 ", (255, 136, 0)),
+    ([1, 2, 3], (1, 2, 3)),
+    ((0, 0, 255), (0, 0, 255)),
+    (["255", 0, 0], (255, 0, 0)),  # as Home Assistant's own byte validator allows
+])
+def test_parse_color(value, color):
+    assert parse_color(value) == color
+
+
+@pytest.mark.parametrize("value", [
+    255, None, True, {"r": 1, "g": 2, "b": 3},
+    "#fff", "#gg0000", "",
+    [1, 2], [1, 2, 3, 4], [1, 2, 300], [-1, 0, 0], [None, 0, 0], ["x", 0, 0],
+])
+def test_parse_color_rejects_anything_else_with_a_value_error(value):
+    with pytest.raises(ValueError):
+        parse_color(value)

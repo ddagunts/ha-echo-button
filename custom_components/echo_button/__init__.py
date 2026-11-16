@@ -7,12 +7,10 @@ so no Echo or Amazon account is involved.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import logging
 from dataclasses import dataclass, field
 
 import voluptuous as vol
-from dbus_fast.errors import DBusError
 
 from homeassistant.components.light import DOMAIN as LIGHT_DOMAIN
 from homeassistant.config_entries import ConfigEntry
@@ -22,11 +20,11 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, service
 from homeassistant.helpers.typing import ConfigType
 
-from .bluez import BluezError
+from .bluez import BLUEZ_ERRORS
 from .client import EchoButtonClient
 from .const import DOMAIN, SERVICE_PLAY_ANIMATION
 from .link import BluezLink
-from .protocol import MAX_REPEAT, MAX_STEP_MS, MAX_STEPS
+from .protocol import MAX_REPEAT, MAX_STEP_MS, MAX_STEPS, parse_color
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,15 +35,10 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 def _color(value):
     """[r, g, b] or a hex string like '#ff8800'."""
-    if isinstance(value, str):
-        text = value.strip().lstrip("#")
-        if len(text) != 6:
-            raise vol.Invalid("hex colors need 6 digits, like #ff8800")
-        try:
-            return tuple(bytes.fromhex(text))
-        except ValueError as err:
-            raise vol.Invalid(f"not a hex color: {value}") from err
-    return tuple(vol.ExactSequence([cv.byte, cv.byte, cv.byte])(list(value)))
+    try:
+        return parse_color(value)
+    except ValueError as err:
+        raise vol.Invalid(str(err)) from err
 
 
 STEP_SCHEMA = vol.Schema({
@@ -93,7 +86,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: EchoButtonConfigEntry) -
             try:
                 await link.start()
                 await link.adapter_path()
-            except (BluezError, DBusError, OSError, EOFError) as err:
+            except BLUEZ_ERRORS as err:
                 await link.stop()
                 raise ConfigEntryNotReady(f"Bluetooth (BlueZ) not available: {err}") from err
             shared.link = link
@@ -117,8 +110,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: EchoButtonConfigEntry) 
     data = entry.runtime_data
     if data.task is not None:
         data.task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
+        try:
             await data.task
+        except asyncio.CancelledError:
+            pass
+        except Exception:  # it had already died; still release the shared link below
+            _LOGGER.exception("Echo Button %s: connection task had failed", data.client.address)
     await _release_link(hass)
     return True
 

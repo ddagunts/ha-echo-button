@@ -136,6 +136,30 @@ def encode_set_light(steps: list[LightStep], repeat: int = 1) -> bytes:
     return bytes(data)
 
 
+def parse_color(value: object) -> Color:
+    """A color written as [r, g, b] (0-255 each) or as a hex string like "#ff8800".
+
+    Raises ValueError for anything else.
+    """
+    if isinstance(value, str):
+        text = value.strip().lstrip("#")
+        if len(text) != 6:
+            raise ValueError("hex colors need 6 digits, like #ff8800")
+        try:
+            return tuple(bytes.fromhex(text))
+        except ValueError:
+            raise ValueError(f"not a hex color: {value}") from None
+    if not isinstance(value, list | tuple) or len(value) != 3:
+        raise ValueError(f"a color is [r, g, b] or a hex string like #ff8800, not {value!r}")
+    try:
+        color = tuple(int(c) for c in value)
+    except (TypeError, ValueError):
+        raise ValueError(f"color values must be numbers 0-255, not {value!r}") from None
+    if not all(0 <= c <= 255 for c in color):
+        raise ValueError(f"color values must be 0-255, not {value!r}")
+    return color
+
+
 def fade_steps(start: Color, end: Color, duration_ms: int, count: int = 16) -> list[LightStep]:
     """A fade as fixed-color steps (excluding `start`, ending on `end`).
 

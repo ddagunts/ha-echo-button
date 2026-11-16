@@ -7,7 +7,6 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from dbus_fast.errors import DBusError
 
 from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.const import CONF_ADDRESS
@@ -33,7 +32,6 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 PAIR_NEW = "pair_new"
-_BLUEZ_ERRORS = (bluez.BluezError, DBusError, OSError, EOFError)
 
 
 class EchoButtonConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -59,7 +57,7 @@ class EchoButtonConfigFlow(ConfigFlow, domain=DOMAIN):
 
         try:
             buttons = await bluez.paired_buttons()
-        except _BLUEZ_ERRORS as err:
+        except bluez.BLUEZ_ERRORS as err:
             _LOGGER.warning("Cannot reach BlueZ: %s", err)
             return self.async_abort(reason="bluez_unavailable")
         configured = self._async_current_ids()
@@ -95,7 +93,7 @@ class EchoButtonConfigFlow(ConfigFlow, domain=DOMAIN):
         except bluez.PairingFailedError as err:
             _LOGGER.warning("Echo Button pairing failed: %s", err)
             self._error = "pair_failed"
-        except _BLUEZ_ERRORS as err:
+        except bluez.BLUEZ_ERRORS as err:
             _LOGGER.warning("Cannot reach BlueZ: %s", err)
             self._error = "bluez_unavailable"
         return self.async_show_progress_done(next_step_id="finish" if self._paired else "pair")

@@ -9,7 +9,7 @@ import logging
 
 from dbus_fast import BusType, Message, MessageType, Variant
 from dbus_fast.aio import MessageBus
-from dbus_fast.errors import DBusError
+from dbus_fast.errors import AuthError, DBusError, InvalidAddressError
 from dbus_fast.service import ServiceInterface, method
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,6 +35,12 @@ class ButtonNotFoundError(BluezError):
 
 class PairingFailedError(BluezError):
     """BlueZ could not pair with the button."""
+
+
+# BlueZ or the system bus can't be reached, or refused a call: worth retrying or
+# reporting. dbus-fast's other errors (bad signatures, names, paths) are bugs.
+# AuthError also covers a bus connection that drops during the handshake.
+BLUEZ_ERRORS = (BluezError, DBusError, AuthError, InvalidAddressError, OSError, EOFError)
 
 
 def unwrap(value):
