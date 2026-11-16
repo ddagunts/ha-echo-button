@@ -20,6 +20,8 @@ jobs:
 
   hacs:
     name: HACS
+    # The HACS validator only works on public repositories.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     steps:
       - uses: hacs/action@main
