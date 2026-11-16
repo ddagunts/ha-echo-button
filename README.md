@@ -12,7 +12,7 @@ It talks to the button directly over Classic Bluetooth through your Home Assista
 host's BlueZ. No Echo, Alexa app or Amazon account is involved, and nothing goes
 through the cloud.
 
-<!-- DEMO -->
+https://github.com/user-attachments/assets/a3f55fe2-0d2b-4031-b9c9-473aa6e054a4
 
 ## Features
 
