@@ -188,6 +188,11 @@ def parse_message(payload: bytes) -> GadgetMessage | None:
         i += 2 + length
     if not fields:
         return None
-    serial = fields[0].decode("ascii", "replace")
+    try:
+        serial = fields[0].decode("ascii")
+    except UnicodeDecodeError:
+        return None  # replies must quote the serial, so one we can't encode is useless
+    if not serial.isprintable():
+        return None
     data = fields[1] if len(fields) > 1 else b""
     return GadgetMessage(type=payload[1], serial=serial, data=bytes(data))

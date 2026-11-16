@@ -181,9 +181,13 @@ device. It offers a serial port (RFCOMM 2), HID, and an **Alexa Gadgets channel 
 RFCOMM 4** (SDP class `0x1201`, plus Amazon's UUID `6088d2b3-983a-4eed-9f94-5ad1256816b7`).
 Presses only come out of channel 4: the serial port and HID channels stay silent.
 
-The integration asks BlueZ to open channel 4 through the `org.bluez.Profile1` D-Bus
-API, and BlueZ hands over the connected socket. That avoids Python `AF_BLUETOOTH`
-sockets, which some Python builds lack. Frames use the Alexa Gadgets Classic framing:
+The integration connects to RFCOMM channel 4 directly, without asking the button's SDP
+server first: after an abrupt disconnect (for example an unplugged adapter) the button
+can refuse SDP for a long time while channel 4 keeps working. Some Python builds,
+including Home Assistant's, lack `AF_BLUETOOTH` sockets, so the socket is created through
+libc. BlueZ's D-Bus API is still used to find the adapter that holds the pairing and to
+learn when the button's Bluetooth link comes up. Frames use the Alexa Gadgets Classic
+framing:
 
 ```
 F0 02 00 <seq> <payload, F0/F1/F2 escaped as F2 xx> <checksum hi lo> F1
@@ -237,7 +241,7 @@ pytest            # protocol and client tests, no Bluetooth needed
 ruff check .
 ```
 
-`protocol.py`, `bluez.py`, `link.py` and `client.py` don't import Home Assistant.
+`protocol.py`, `bluez.py`, `rfcomm.py`, `link.py` and `client.py` don't import Home Assistant.
 `tools/echobtn_cli.py` (pair, list, print presses) and `tools/demo.py` (LED showcase)
 run the same code without Home Assistant.
 

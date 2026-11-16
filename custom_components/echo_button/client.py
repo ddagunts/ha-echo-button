@@ -7,7 +7,7 @@ from collections.abc import Callable, Coroutine
 
 from dbus_fast.errors import DBusError
 
-from .bluez import BLUEZ_ERRORS, device_path
+from .bluez import BLUEZ_ERRORS
 from .link import BluezLink
 from .protocol import (
     ESC,
@@ -41,7 +41,11 @@ LONG_PRESS_SECONDS = 1.0
 STALE_PRESS_SECONDS = 30.0  # a "pressed" with no "released" this long is dropped
 CONNECT_TIMEOUT = 25.0
 RETRY_WHILE_LINKED = 2.0  # Bluetooth link up but gadget channel closed
+RETRY_WHILE_LINKED_MAX = 15.0  # ... doubling while it keeps failing, up to this
 RETRY_FALLBACK = 120.0  # button asleep: mostly wait for it to reconnect to us
+RETRY_SECONDS = 30.0  # BlueZ unreachable, or the button unknown to it
+RELOOKUP_SECONDS = 2.0  # the button's device object went away; give BlueZ a moment, then look again
+SEND_ATTEMPTS = 100  # x 10 ms; frames are tiny, so the socket buffer is practically never full
 # One command lasts at most 255 x 65.5 s (~4.6 h); resend the steady light well before that.
 BASE_LIGHT_REFRESH_SECONDS = 3600.0
 OFF: Color = (0, 0, 0)
@@ -65,13 +69,15 @@ class EchoButtonClient:
         self._listeners: list[Callable[[str], None]] = []
         self._wake = asyncio.Event()
         self._linked = False  # BlueZ Device1.Connected (baseband link)
-        self._fds: asyncio.Queue[int] = asyncio.Queue()
-        self._chunks: asyncio.Queue[bytes] | None = None
+        self._device_gone = False  # BlueZ dropped the device object: look the button up again
+        self._retrying = False  # a lasting Bluetooth problem was already logged as a warning
+        self._send_lock = asyncio.Lock()  # one frame goes out whole before the next starts
         self._fd: int | None = None
         self._tx_seq = 1
         self._serial_seen = asyncio.Event()
         self._pressed_at: float | None = None
-        self._dev_path: str | None = None
+        self._dev_path: str | None = None  # BlueZ device object, on the adapter holding the pairing
+        self._adapter: str | None = None  # that adapter's Bluetooth address
         self._base_color: Color | None = None  # steady LED color, None = off
         self._base_timer: asyncio.TimerHandle | None = None  # sends the steady color again
         self._led_commands = 0  # LED commands sent so far; lets a late resend see it was overtaken
@@ -167,19 +173,23 @@ class EchoButtonClient:
             raise NotConnectedError(f"Echo Button {self.address} is not connected")
         if self.serial is None:
             await asyncio.wait_for(self._serial_seen.wait(), 2)
-        seq = self._tx_seq
-        self._tx_seq = (self._tx_seq + 1) & 0xFF
-        while self._tx_seq in (STX, ETX, ESC):
+        async with self._send_lock:
+            fd = self._fd
+            seq = self._tx_seq
             self._tx_seq = (self._tx_seq + 1) & 0xFF
-        frame = encode_frame(encode_message(msg_type, self.serial, data), seq)
-        for _ in range(100):  # frames are tiny; the socket buffer is practically never full
-            try:
-                os.write(self._fd, frame)
-                return
-            except BlockingIOError:
+            while self._tx_seq in (STX, ETX, ESC):
+                self._tx_seq = (self._tx_seq + 1) & 0xFF
+            rest = memoryview(encode_frame(encode_message(msg_type, self.serial, data), seq))
+            for _ in range(SEND_ATTEMPTS):
+                if fd is None or self._fd != fd:  # never write the rest of a frame into a newer connection
+                    raise NotConnectedError(f"Echo Button {self.address} disconnected")
+                try:
+                    rest = rest[os.write(fd, rest):]
+                except BlockingIOError:
+                    pass
+                if not rest:
+                    return
                 await asyncio.sleep(0.01)
-            except TypeError as err:  # fd went away while waiting
-                raise NotConnectedError(str(err)) from err
         raise OSError("Echo Button send buffer stayed full")
 
     # --- LinkListener (called by BluezLink in the event loop) ---
@@ -190,12 +200,11 @@ class EchoButtonClient:
         if connected:
             self._wake.set()  # the button woke up and connected to us: open the gadget channel now
 
-    def on_channel_opened(self, fd: int) -> None:
-        self._fds.put_nowait(fd)
-
-    def on_channel_close_requested(self) -> None:
-        if self._chunks is not None:
-            self._chunks.put_nowait(b"")
+    def on_device_gone(self) -> None:
+        self._log.debug("Echo Button %s: BlueZ device object gone; will look it up again", self.address)
+        self._linked = False
+        self._device_gone = True
+        self._wake.set()
 
     # --- main loop ---
 
@@ -204,27 +213,43 @@ class EchoButtonClient:
         try:
             while True:
                 try:
-                    await self._run_once()
+                    await self._run_once()  # returns when BlueZ dropped the button's device object
+                    await asyncio.sleep(RELOOKUP_SECONDS)
                 except BLUEZ_ERRORS as err:
-                    self._log.warning("Echo Button %s: Bluetooth problem (%s); retrying in 30 s", self.address, err)
-                    await asyncio.sleep(30)
+                    # Warn once; while the problem lasts (button unpaired, adapter unplugged), log at debug.
+                    log = self._log.debug if self._retrying else self._log.warning
+                    log("Echo Button %s: Bluetooth problem (%s); retrying in %.0f s", self.address, err, RETRY_SECONDS)
+                    self._retrying = True
+                    await asyncio.sleep(RETRY_SECONDS)
         finally:
             self._cancel_base_timer()
             for task in list(self._tasks):
                 task.cancel()
 
     async def _run_once(self) -> None:
-        self._dev_path = device_path(await self._link.adapter_path(), self.address)
+        self._device_gone = False
+        self._dev_path, self._adapter = await self._link.find_device(self.address)
         detach = self._link.attach(self._dev_path, self)
         try:
             self._linked = await self._link.device_connected(self._dev_path)
-            while True:
+            failures = 0  # gadget channel attempts that failed in a row
+            while not self._device_gone:
                 self._wake.clear()
                 try:
                     await self._session()
+                    failures = 0
                 except (DBusError, OSError, TimeoutError) as err:
-                    self._log.debug("Echo Button %s not reachable: %s", self.address, err)
-                delay = RETRY_WHILE_LINKED if self._linked else RETRY_FALLBACK
+                    failures += 1
+                    self._log.debug("Echo Button %s not reachable: %s", self.address, err or type(err).__name__)
+                if self._device_gone:
+                    break
+                # Ask rather than rely on signals alone: a bluetoothd restart, for one, sends none.
+                self._linked = await self._link.device_connected(self._dev_path)
+                if self._linked:
+                    # Link up but the channel won't open: back off 2, 4, 8 ... s.
+                    delay = min(RETRY_WHILE_LINKED * 2 ** max(failures - 1, 0), RETRY_WHILE_LINKED_MAX)
+                else:
+                    delay = RETRY_FALLBACK
                 try:
                     await asyncio.wait_for(self._wake.wait(), delay)
                 except TimeoutError:
@@ -235,19 +260,8 @@ class EchoButtonClient:
 
     async def _session(self) -> None:
         loop = asyncio.get_running_loop()
-        while not self._fds.empty():
-            os.close(self._fds.get_nowait())
-        try:
-            await asyncio.wait_for(self._link.connect_channel(self._dev_path), CONNECT_TIMEOUT)
-        except DBusError as err:
-            if err.type == "org.bluez.Error.AlreadyConnected":
-                # BlueZ still holds a channel we no longer read from; drop it and retry.
-                await self._link.disconnect_channel(self._dev_path)
-            raise
-        fd = await asyncio.wait_for(self._fds.get(), 5)
-
+        fd = await asyncio.wait_for(self._link.open_channel(self.address, self._adapter), CONNECT_TIMEOUT)
         chunks: asyncio.Queue[bytes] = asyncio.Queue()
-        self._chunks = chunks
 
         def on_readable() -> None:
             try:
@@ -265,6 +279,7 @@ class EchoButtonClient:
         loop.add_reader(fd, on_readable)
         self._fd = fd
         self._log.info("Connected to Echo Button %s", self.address)
+        self._retrying = False
         self._set_connected(True)
         if self.serial is not None:
             self._restore_base_soon()
@@ -281,7 +296,6 @@ class EchoButtonClient:
             self._fd = None
             loop.remove_reader(fd)
             os.close(fd)
-            self._chunks = None
             self._pressed_at = None
             self._cancel_base_timer()
             self._set_connected(False)

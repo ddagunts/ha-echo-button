@@ -136,3 +136,11 @@ def test_parse_color(value, color):
 def test_parse_color_rejects_anything_else_with_a_value_error(value):
     with pytest.raises(ValueError):
         parse_color(value)
+
+
+def test_message_with_an_unusable_serial_is_dropped():
+    good = encode_message(MSG_STATUS, SERIAL, STATUS)
+    assert parse_message(good) is not None
+    for bad_serial in (b"G0\xff0AB0000000000", b"G000AB000000000\x00"):
+        payload = bytes([0x01, MSG_STATUS, 0x01, len(bad_serial)]) + bad_serial + bytes([0x01, len(STATUS)]) + STATUS
+        assert parse_message(payload) is None

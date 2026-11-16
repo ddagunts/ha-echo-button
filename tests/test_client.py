@@ -1,11 +1,15 @@
 """Client logic tests: press detection and LED sending, without Bluetooth."""
 
 import asyncio
+import errno
+import logging
+import os
 import socket
 
 import echo_button.client
 import pytest
 from dbus_fast.errors import AuthError
+from echo_button.bluez import DeviceNotFoundError
 from echo_button.client import EVENT_LONG_PRESS, EVENT_PRESS, EchoButtonClient, NotConnectedError
 from echo_button.protocol import (
     MAX_REPEAT,
@@ -212,7 +216,7 @@ def test_steady_color_goes_out_once_the_serial_is_known():
 
 def test_bus_auth_error_is_retried_not_fatal():
     class BusDown:
-        async def adapter_path(self) -> str:
+        async def find_device(self, address: str) -> str:
             raise AuthError("connection closed during authentication")
 
     async def scenario():
@@ -220,6 +224,163 @@ def test_bus_auth_error_is_retried_not_fatal():
         task = asyncio.create_task(client.run())
         await asyncio.sleep(0.01)
         assert not task.done()  # logged, waiting to retry
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+
+class FakeLink:
+    """Stands in for BluezLink: the button is never reachable, every attempt is recorded."""
+
+    def __init__(self, paths: list[str], connected: list[bool]) -> None:
+        self.paths = paths  # what find_device returns, one per lookup (the last one repeats)
+        self.connected = connected  # what device_connected returns, one per call (the last one repeats)
+        self.attached: list[str] = []
+        self.attempts = 0
+        self.listener = None
+
+    async def find_device(self, address: str) -> tuple[str, str]:
+        path = self.paths.pop(0) if len(self.paths) > 1 else self.paths[0]
+        return path, "11:22:33:44:55:66"
+
+    def attach(self, dev_path, listener):
+        self.attached.append(dev_path)
+        self.listener = listener
+        return lambda: None
+
+    async def device_connected(self, dev_path: str) -> bool:
+        return self.connected.pop(0) if len(self.connected) > 1 else self.connected[0]
+
+    async def open_channel(self, address: str, adapter: str) -> int:
+        self.attempts += 1
+        raise ConnectionRefusedError(errno.ECONNREFUSED, "Connection refused")
+
+
+HCI0 = "/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF"
+HCI1 = "/org/bluez/hci1/dev_AA_BB_CC_DD_EE_FF"
+
+
+def test_looks_the_button_up_again_when_its_device_object_goes_away(monkeypatch):
+    monkeypatch.setattr(echo_button.client, "RELOOKUP_SECONDS", 0)
+
+    async def scenario():
+        link = FakeLink([HCI0, HCI1], [False])
+        client = EchoButtonClient("aa:bb:cc:dd:ee:ff", link)
+        task = asyncio.create_task(client.run())
+        await asyncio.sleep(0.01)
+        assert link.attached == [HCI0]
+        link.listener.on_device_gone()  # e.g. the USB adapter was unplugged and came back as hci1
+        await asyncio.sleep(0.01)
+        assert link.attached == [HCI0, HCI1]
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+
+def test_link_that_dropped_without_a_signal_is_retried_slowly(monkeypatch):
+    monkeypatch.setattr(echo_button.client, "RETRY_WHILE_LINKED", 0.01)
+    monkeypatch.setattr(echo_button.client, "RETRY_FALLBACK", 10)
+
+    async def scenario():
+        link = FakeLink([HCI0], [True, False])  # linked at first, then gone (no signal, e.g. bluetoothd restart)
+        client = EchoButtonClient("aa:bb:cc:dd:ee:ff", link)
+        task = asyncio.create_task(client.run())
+        await asyncio.sleep(0.2)
+        assert link.attempts == 1  # not one every 10 ms
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+
+def test_lasting_bluetooth_problem_warns_once(monkeypatch, caplog):
+    monkeypatch.setattr(echo_button.client, "RETRY_SECONDS", 0.01)
+
+    class Unpaired:
+        async def find_device(self, address: str) -> str:
+            raise DeviceNotFoundError("BlueZ doesn't know AA:BB:CC:DD:EE:FF")
+
+    async def scenario():
+        client = EchoButtonClient("aa:bb:cc:dd:ee:ff", Unpaired())
+        task = asyncio.create_task(client.run())
+        await asyncio.sleep(0.1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    caplog.set_level(logging.DEBUG)
+    asyncio.run(scenario())
+    problems = [r for r in caplog.records if "Bluetooth problem" in r.message]
+    assert len(problems) > 2
+    assert [r.levelno for r in problems[:2]] == [logging.WARNING, logging.DEBUG]
+
+
+def test_partial_writes_still_send_whole_frames_in_order(monkeypatch):
+    async def scenario():
+        client, _ = make_client()
+        ours, button = connect(client)
+        feed(client, MSG_STATUS, STATUS, 0.0)
+        real_write = os.write
+        calls = 0
+
+        def chunky_write(fd, data):  # 7 bytes at a time, with a full buffer every other call
+            nonlocal calls
+            if fd != ours.fileno():
+                return real_write(fd, data)
+            calls += 1
+            if calls % 2 == 0:
+                raise BlockingIOError
+            return real_write(fd, bytes(data[:7]))
+
+        monkeypatch.setattr(os, "write", chunky_write)
+        await asyncio.gather(client.play_animation(GREEN), client.play_animation(RED))
+        monkeypatch.undo()
+        assert sent(button) == [encode_set_light(GREEN), encode_set_light(RED)]
+        client._cancel_base_timer()
+        ours.close()
+        button.close()
+
+    asyncio.run(scenario())
+
+
+def test_send_stops_when_the_connection_changes_mid_frame(monkeypatch):
+    async def scenario():
+        client, _ = make_client()
+        ours, button = connect(client)
+        feed(client, MSG_STATUS, STATUS, 0.0)
+
+        def stuck_write(fd, data):
+            raise BlockingIOError
+
+        monkeypatch.setattr(os, "write", stuck_write)
+        task = asyncio.create_task(client.play_animation(GREEN))
+        await asyncio.sleep(0.03)
+        client._fd = None  # the session ended while the frame was waiting
+        with pytest.raises(NotConnectedError):
+            await task
+        monkeypatch.undo()
+        ours.close()
+        button.close()
+
+    asyncio.run(scenario())
+
+
+def test_channel_refused_while_linked_backs_off(monkeypatch):
+    monkeypatch.setattr(echo_button.client, "RETRY_WHILE_LINKED", 0.01)
+    monkeypatch.setattr(echo_button.client, "RETRY_WHILE_LINKED_MAX", 0.04)
+
+    async def scenario():
+        link = FakeLink([HCI0], [True])  # link stays up, channel always refused
+        client = EchoButtonClient("aa:bb:cc:dd:ee:ff", link)
+        task = asyncio.create_task(client.run())
+        await asyncio.sleep(0.3)
+        # 10, 20, 40, 40, 40 ... ms apart: about 9 attempts, not 30
+        assert 5 <= link.attempts <= 12
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
