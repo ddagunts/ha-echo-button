@@ -1,0 +1,20 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "SIM", "PIE", "RUF"]
+ignore = [
+    "RUF012",  # Home Assistant entity class attributes (_attr_*) are mutable by design
+    "E731",    # small lambdas are fine for unsubscribe callbacks
+    "SIM105",  # try/except/pass is clear enough
+]
+
+[tool.ruff.lint.per-file-ignores]
+# dbus-fast reads D-Bus signatures from these string annotations ("o", "s", ...).
+"custom_components/echo_button/bluez.py" = ["F821", "F722", "UP037"]
+"custom_components/echo_button/link.py" = ["F821", "F722", "UP037"]
+"research/*.py" = ["F821", "F722", "UP", "E501", "E741", "SIM", "B", "RUF", "PIE"]

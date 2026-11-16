@@ -1,0 +1,13 @@
+{
+  "domain": "echo_button",
+  "name": "Amazon Echo Button",
+  "codeowners": ["@ddagunts"],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/ddagunts/ha-echo-button",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/ddagunts/ha-echo-button/issues",
+  "requirements": ["dbus-fast"],
+  "version": "0.1.0"
+}

@@ -1,0 +1,12 @@
+.venv/
+.venv-*/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Raw Bluetooth captures contain pairing link keys and the addresses and names of
+# nearby devices. Never commit them.
+research/captures/
+*.btsnoop
+*.log

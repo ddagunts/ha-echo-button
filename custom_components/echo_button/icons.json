@@ -1,0 +1,31 @@
+{
+  "entity": {
+    "switch": {
+      "toggle": {
+        "default": "mdi:gesture-tap-button",
+        "state": {
+          "off": "mdi:toggle-switch-off-outline",
+          "on": "mdi:toggle-switch"
+        }
+      }
+    },
+    "light": {
+      "led": {
+        "default": "mdi:led-on",
+        "state": {
+          "off": "mdi:led-off"
+        }
+      }
+    },
+    "event": {
+      "button": {
+        "default": "mdi:gesture-tap-button"
+      }
+    }
+  },
+  "services": {
+    "play_animation": {
+      "service": "mdi:animation-play"
+    }
+  }
+}

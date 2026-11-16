@@ -1,0 +1,83 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Choose an Echo Button",
+        "description": "These Echo Buttons are already paired with this Home Assistant host.",
+        "data": {
+          "address": "Button"
+        }
+      },
+      "pair": {
+        "title": "Pair an Echo Button",
+        "description": "1. If the button is paired with an Echo, unplug that Echo for now.\n2. Hold the Echo Button down until it glows **orange**. That takes 5–20 seconds; keep holding through any blue or green flashes.\n3. Release it, then select **Submit**. The button stays in pairing mode for a couple of minutes."
+      }
+    },
+    "progress": {
+      "pairing": "Looking for an Echo Button in pairing mode and pairing with it. This can take up to 45 seconds."
+    },
+    "error": {
+      "not_found": "No Echo Button in pairing mode was found. Make sure it glows orange, then select Submit again.",
+      "pair_failed": "Pairing failed. Put the button back into pairing mode (orange) and try again.",
+      "bluez_unavailable": "Could not reach the Bluetooth service (BlueZ) on this host."
+    },
+    "abort": {
+      "already_configured": "This Echo Button is already set up.",
+      "bluez_unavailable": "Could not reach the Bluetooth service (BlueZ). This integration needs a Bluetooth adapter on the Home Assistant host."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Press feedback",
+        "description": "After each short press, the button glows the toggle's new state color, then fades back. The button's own blue flash on press can't be turned off.",
+        "data": {
+          "feedback_ms": "Feedback duration (0 = no feedback)",
+          "on_color": "Color when turned on",
+          "off_color": "Color when turned off"
+        }
+      }
+    }
+  },
+  "entity": {
+    "switch": {
+      "toggle": {
+        "name": "Toggle"
+      }
+    },
+    "light": {
+      "led": {
+        "name": "LED"
+      }
+    },
+    "event": {
+      "button": {
+        "name": "Button",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "press": "Press",
+              "long_press": "Long press"
+            }
+          }
+        }
+      }
+    }
+  },
+  "services": {
+    "play_animation": {
+      "name": "Play animation",
+      "description": "Plays a light animation on an Echo Button, then returns to the LED entity's steady color (or off).",
+      "fields": {
+        "steps": {
+          "name": "Steps",
+          "description": "List of up to 41 steps. Each has a color ([r, g, b] or \"#rrggbb\"), a duration in milliseconds (1–65535) and an optional fade (true fades into this step's color)."
+        },
+        "repeat": {
+          "name": "Repeat",
+          "description": "How many times to play the sequence (1–255)."
+        }
+      }
+    }
+  }
+}
