@@ -49,10 +49,6 @@ RELOOKUP_SECONDS = 2.0  # the button's device object went away; give BlueZ a mom
 SEND_ATTEMPTS = 100  # x 10 ms; frames are tiny, so the socket buffer is practically never full
 # One command lasts at most 255 x 65.5 s (~4.6 h); resend the steady light well before that.
 BASE_LIGHT_REFRESH_SECONDS = 3600.0
-# The button falls asleep 10 minutes after the last status request (reopening the
-# channel doesn't reset that), and the press that wakes it is lost. With keep_awake
-# on, a status request goes out this often: no visible effect, the button just answers.
-KEEP_AWAKE_SECONDS = 240.0
 OFF: Color = (0, 0, 0)
 
 
@@ -69,7 +65,6 @@ class EchoButtonClient:
         self.connected = False
         self.last_status: bytes | None = None  # type 0x03 data, meaning unknown (shown in diagnostics)
         self.capabilities: bytes | None = None  # type 0x04 data
-        self.keep_awake = False  # can change at any time; read before each keep-awake message
         self._link = link
         self._log = logger or _LOGGER
         self._listeners: list[Callable[[str], None]] = []
@@ -87,6 +82,8 @@ class EchoButtonClient:
         self._base_color: Color | None = None  # steady LED color, None = off
         self._base_timer: asyncio.TimerHandle | None = None  # sends the steady color again
         self._led_commands = 0  # LED commands sent so far; lets a late resend see it was overtaken
+        self._keep_awake_seconds: float | None = None  # None = off
+        self._keeper: asyncio.Task | None = None  # sends the keep-awake requests while connected
         self._tasks: set[asyncio.Task] = set()
 
     def add_listener(self, callback: Callable[[str], None]) -> Callable[[], None]:
@@ -173,6 +170,47 @@ class EchoButtonClient:
         if self._base_timer is not None:
             self._base_timer.cancel()
             self._base_timer = None
+
+    # --- keep awake ---
+
+    @property
+    def keep_awake_seconds(self) -> float | None:
+        return self._keep_awake_seconds
+
+    def set_keep_awake(self, seconds: float | None) -> None:
+        """Send a status request every `seconds` while connected (None = off).
+
+        The request has no visible effect, but keeps the button from falling asleep
+        (protocol.SLEEP_SECONDS after the last one). One also goes out on connect.
+        A change applies right away: while connected, a request goes out now and
+        the interval starts over, so a longer interval can't leave a gap.
+        """
+        if seconds == self._keep_awake_seconds:
+            return  # e.g. another option was saved
+        if seconds is not None and seconds <= 0:
+            raise ValueError("keep-awake interval must be positive")
+        self._keep_awake_seconds = seconds
+        if self._fd is not None:
+            self._start_keeper()
+
+    def _start_keeper(self) -> None:
+        self._stop_keeper()
+        if self._keep_awake_seconds is not None:
+            self._keeper = asyncio.get_running_loop().create_task(self._keep_awake_loop(self._keep_awake_seconds))
+
+    def _stop_keeper(self) -> None:
+        if self._keeper is not None:
+            self._keeper.cancel()
+            self._keeper = None
+
+    async def _keep_awake_loop(self, seconds: float) -> None:
+        """Runs for one connection and interval. Starts with a request: connecting doesn't reset the sleep timer."""
+        while True:
+            try:
+                await self._send(MSG_STATUS_REQUEST, b"")
+            except (NotConnectedError, OSError, TimeoutError) as err:
+                self._log.debug("Echo Button %s: keep-awake request failed: %s", self.address, err)
+            await asyncio.sleep(seconds)
 
     async def _send(self, msg_type: int, data: bytes) -> None:
         if self._fd is None:
@@ -291,7 +329,7 @@ class EchoButtonClient:
             self._restore_base_soon()
         # else: commands need the button's serial, so _handle sends the steady color
         # once the button's first message brings it.
-        keeper = loop.create_task(self._keep_awake_loop())
+        self._start_keeper()
         parser = FrameParser()
         try:
             while data := await chunks.get():
@@ -300,24 +338,13 @@ class EchoButtonClient:
                         self._handle(message, loop.time())
             self._log.info("Echo Button %s disconnected", self.address)
         finally:
-            keeper.cancel()
+            self._stop_keeper()
             self._fd = None
             loop.remove_reader(fd)
             os.close(fd)
             self._pressed_at = None
             self._cancel_base_timer()
             self._set_connected(False)
-
-    async def _keep_awake_loop(self) -> None:
-        """Runs for one connection: while keep_awake is on, ask for status every few minutes."""
-        while True:
-            await asyncio.sleep(KEEP_AWAKE_SECONDS)
-            if not self.keep_awake:
-                continue
-            try:
-                await self._send(MSG_STATUS_REQUEST, b"")
-            except (NotConnectedError, OSError, TimeoutError) as err:
-                self._log.debug("Echo Button %s: keep-awake request failed: %s", self.address, err)
 
     def _handle(self, message: GadgetMessage, now: float) -> None:
         if message.serial:

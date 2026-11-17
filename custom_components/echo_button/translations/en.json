@@ -35,10 +35,12 @@
           "feedback_ms": "Feedback duration (0 = no feedback)",
           "on_color": "Color when turned on",
           "off_color": "Color when turned off",
-          "keep_awake": "Keep awake"
+          "keep_awake": "Keep awake",
+          "keep_awake_seconds": "Keep-awake interval"
         },
         "data_description": {
-          "keep_awake": "The button goes to sleep after 10 idle minutes. The next press only wakes it and isn't reported; it reconnects about 2 seconds later. With this on, Home Assistant asks the button for its status every 4 minutes so it stays awake. This likely drains the batteries faster."
+          "keep_awake": "The button goes to sleep after 10 idle minutes. The next press only wakes it and isn't reported; it reconnects about 2 seconds later. With this on, Home Assistant asks the button for its status regularly so it stays awake. This likely drains the batteries faster.",
+          "keep_awake_seconds": "How often to ask for status while Keep awake is on (10–540 s). Must stay under the button's 10-minute sleep timer."
         }
       }
     }

@@ -23,14 +23,17 @@ from . import bluez
 from .const import (
     CONF_FEEDBACK_MS,
     CONF_KEEP_AWAKE,
+    CONF_KEEP_AWAKE_SECONDS,
     CONF_OFF_COLOR,
     CONF_ON_COLOR,
     DEFAULT_FEEDBACK_MS,
     DEFAULT_KEEP_AWAKE,
+    DEFAULT_KEEP_AWAKE_SECONDS,
     DEFAULT_OFF_COLOR,
     DEFAULT_ON_COLOR,
     DOMAIN,
 )
+from .protocol import SLEEP_SECONDS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -117,6 +120,7 @@ class EchoButtonOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
             user_input[CONF_FEEDBACK_MS] = int(user_input[CONF_FEEDBACK_MS])
+            user_input[CONF_KEEP_AWAKE_SECONDS] = int(user_input[CONF_KEEP_AWAKE_SECONDS])
             return self.async_create_entry(data=user_input)
         options = self.config_entry.options
         schema = vol.Schema({
@@ -127,5 +131,10 @@ class EchoButtonOptionsFlow(OptionsFlow):
             vol.Required(CONF_OFF_COLOR, default=options.get(CONF_OFF_COLOR, DEFAULT_OFF_COLOR)): ColorRGBSelector(),
             vol.Required(CONF_KEEP_AWAKE, default=options.get(CONF_KEEP_AWAKE, DEFAULT_KEEP_AWAKE)):
                 BooleanSelector(),
+            # Up to a minute short of the button's sleep timer, so a late request still makes it.
+            vol.Required(CONF_KEEP_AWAKE_SECONDS,
+                         default=options.get(CONF_KEEP_AWAKE_SECONDS, DEFAULT_KEEP_AWAKE_SECONDS)):
+                NumberSelector(NumberSelectorConfig(min=10, max=SLEEP_SECONDS - 60, step=10, unit_of_measurement="s",
+                                                    mode=NumberSelectorMode.BOX)),
         })
         return self.async_show_form(step_id="init", data_schema=schema)

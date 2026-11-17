@@ -76,8 +76,9 @@ On the integration card, select **Configure** to set:
   color appears right after it.
 - **Keep awake** (off by default): the button goes to sleep after 10 idle minutes. The
   next press only wakes it and isn't reported; the button reconnects about 2 seconds
-  later. With this on, Home Assistant asks the button for its status every 4 minutes,
-  which keeps it awake and connected. This likely drains the batteries faster.
+  later. With this on, Home Assistant asks the button for its status when it connects
+  and then every **Keep-awake interval** (default 240 s, up to 540 s), which keeps it
+  awake and connected. This likely drains the batteries faster.
 
 ## Example automations
 

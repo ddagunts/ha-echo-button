@@ -413,8 +413,8 @@ def received(button: socket.socket) -> list[tuple[int, bytes]]:
     return [(m.type, m.data) for m in map(parse_message, frames)]
 
 
-def test_keep_awake_sends_status_requests_only_while_enabled(monkeypatch):
-    monkeypatch.setattr(echo_button.client, "KEEP_AWAKE_SECONDS", 0.02)
+def test_keep_awake_sends_status_requests_only_while_enabled():
+    keep_awake = (MSG_STATUS_REQUEST, b"")
 
     async def scenario():
         link = OpenLink()
@@ -425,25 +425,55 @@ def test_keep_awake_sends_status_requests_only_while_enabled(monkeypatch):
         await asyncio.sleep(0.1)
         assert received(link.button) == []  # off by default
 
-        client.keep_awake = True
+        client.set_keep_awake(0.02)
+        await asyncio.sleep(0.005)
+        assert received(link.button) == [keep_awake]  # right away, not one interval later
         await asyncio.sleep(0.1)
         requests = received(link.button)
         assert 3 <= len(requests) <= 6
-        assert set(requests) == {(MSG_STATUS_REQUEST, b"")}
+        assert set(requests) == {keep_awake}
 
-        client.keep_awake = False
-        await asyncio.sleep(0.03)
-        received(link.button)  # one may have been on its way
+        client.set_keep_awake(10)  # a longer interval: one now, then quiet
+        await asyncio.sleep(0.005)
+        assert received(link.button) == [keep_awake]
         await asyncio.sleep(0.1)
         assert received(link.button) == []
+        client.set_keep_awake(10)  # unchanged (another option was saved): nothing extra
+        await asyncio.sleep(0.01)
+        assert received(link.button) == []
 
-        client.keep_awake = True
-        link.button.close()  # the button went away: the session ends, and its keep-awake timer with it
+        client.set_keep_awake(None)
+        await asyncio.sleep(0.05)
+        assert received(link.button) == []
+
+        client.set_keep_awake(0.02)
+        link.button.close()  # the button went away: the session ends, and its keep-awake task with it
         await asyncio.sleep(0.05)
         assert not client.connected
         assert not [t for t in asyncio.all_tasks() if t.get_coro().__name__ == "_keep_awake_loop"]
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
+
+    asyncio.run(scenario())
+
+
+def test_keep_awake_starts_with_a_request_on_connect():
+    async def scenario():
+        link = OpenLink()
+        client = EchoButtonClient("aa:bb:cc:dd:ee:ff", link)
+        client.set_keep_awake(240)  # set before connecting, as Home Assistant does
+        task = asyncio.create_task(client.run())
+        await asyncio.sleep(0.01)
+        link.button.send(encode_frame(encode_message(MSG_STATUS, SERIAL, STATUS), 1))
+        await asyncio.sleep(0.05)
+        # Connecting doesn't reset the button's sleep timer, so don't wait 240 s for the first one.
+        assert received(link.button) == [(MSG_STATUS_REQUEST, b"")]
+        with pytest.raises(ValueError):
+            client.set_keep_awake(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        link.button.close()
 
     asyncio.run(scenario())

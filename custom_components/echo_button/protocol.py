@@ -19,8 +19,11 @@ checks lengths strictly and silently ignores anything malformed):
          01 01 <repeat 1-255> <step count> + per step:
          <duration ms, u16 big-endian> <R> <G> <B> <blend: 01 = fade into this color>
          The button's built-in blue press flash still plays over it.
-    0x07 status request (no data) -> replies with 0x03
+    0x07 status request (no data) -> replies with 0x03; also keeps the button awake
     0x02 0x05 0x09 0x0a: take data, meaning unknown
+
+The button falls asleep SLEEP_SECONDS after the last status request (opening a
+new connection doesn't reset that) and drops off; the press that wakes it is lost.
 """
 
 from dataclasses import dataclass
@@ -42,6 +45,8 @@ STATE_RELEASED = 0x03
 MAX_STEPS = 41  # the data length field is one byte: 4 + 6 * 41 = 250
 MAX_STEP_MS = 0xFFFF
 MAX_REPEAT = 255
+
+SLEEP_SECONDS = 600
 
 Color = tuple[int, int, int]
 

@@ -22,7 +22,14 @@ from homeassistant.helpers.typing import ConfigType
 
 from .bluez import BLUEZ_ERRORS
 from .client import EchoButtonClient
-from .const import CONF_KEEP_AWAKE, DEFAULT_KEEP_AWAKE, DOMAIN, SERVICE_PLAY_ANIMATION
+from .const import (
+    CONF_KEEP_AWAKE,
+    CONF_KEEP_AWAKE_SECONDS,
+    DEFAULT_KEEP_AWAKE,
+    DEFAULT_KEEP_AWAKE_SECONDS,
+    DOMAIN,
+    SERVICE_PLAY_ANIMATION,
+)
 from .link import BluezLink
 from .protocol import MAX_REPEAT, MAX_STEP_MS, MAX_STEPS, parse_color
 
@@ -109,7 +116,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: EchoButtonConfigEntry) -
 
 
 def _apply_options(entry: EchoButtonConfigEntry) -> None:
-    entry.runtime_data.client.keep_awake = bool(entry.options.get(CONF_KEEP_AWAKE, DEFAULT_KEEP_AWAKE))
+    options = entry.options
+    enabled = options.get(CONF_KEEP_AWAKE, DEFAULT_KEEP_AWAKE)
+    entry.runtime_data.client.set_keep_awake(
+        float(options.get(CONF_KEEP_AWAKE_SECONDS, DEFAULT_KEEP_AWAKE_SECONDS)) if enabled else None)
 
 
 async def _async_options_updated(hass: HomeAssistant, entry: EchoButtonConfigEntry) -> None:
