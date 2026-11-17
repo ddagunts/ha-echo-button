@@ -17,8 +17,10 @@ from echo_button.protocol import (
     MSG_BUTTON,
     MSG_SET_LIGHT,
     MSG_STATUS,
+    MSG_STATUS_REQUEST,
     FrameParser,
     LightStep,
+    encode_frame,
     encode_message,
     encode_set_light,
     parse_message,
@@ -381,6 +383,65 @@ def test_channel_refused_while_linked_backs_off(monkeypatch):
         await asyncio.sleep(0.3)
         # 10, 20, 40, 40, 40 ... ms apart: about 9 attempts, not 30
         assert 5 <= link.attempts <= 12
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+
+
+class OpenLink(FakeLink):
+    """The gadget channel opens; `button` is the button's end of it."""
+
+    def __init__(self) -> None:
+        super().__init__([HCI0], [True])
+        self.button: socket.socket | None = None
+
+    async def open_channel(self, address: str, adapter: str) -> int:
+        self.attempts += 1
+        ours, self.button = socket.socketpair()
+        self.button.setblocking(False)
+        return ours.detach()  # the client owns and closes this fd
+
+
+def received(button: socket.socket) -> list[tuple[int, bytes]]:
+    """(type, data) of every message the button received since the last call."""
+    try:
+        frames = FrameParser().feed(button.recv(65536))
+    except BlockingIOError:
+        return []
+    return [(m.type, m.data) for m in map(parse_message, frames)]
+
+
+def test_keep_awake_sends_status_requests_only_while_enabled(monkeypatch):
+    monkeypatch.setattr(echo_button.client, "KEEP_AWAKE_SECONDS", 0.02)
+
+    async def scenario():
+        link = OpenLink()
+        client = EchoButtonClient("aa:bb:cc:dd:ee:ff", link)
+        task = asyncio.create_task(client.run())
+        await asyncio.sleep(0.01)
+        link.button.send(encode_frame(encode_message(MSG_STATUS, SERIAL, STATUS), 1))  # brings the serial
+        await asyncio.sleep(0.1)
+        assert received(link.button) == []  # off by default
+
+        client.keep_awake = True
+        await asyncio.sleep(0.1)
+        requests = received(link.button)
+        assert 3 <= len(requests) <= 6
+        assert set(requests) == {(MSG_STATUS_REQUEST, b"")}
+
+        client.keep_awake = False
+        await asyncio.sleep(0.03)
+        received(link.button)  # one may have been on its way
+        await asyncio.sleep(0.1)
+        assert received(link.button) == []
+
+        client.keep_awake = True
+        link.button.close()  # the button went away: the session ends, and its keep-awake timer with it
+        await asyncio.sleep(0.05)
+        assert not client.connected
+        assert not [t for t in asyncio.all_tasks() if t.get_coro().__name__ == "_keep_awake_loop"]
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task

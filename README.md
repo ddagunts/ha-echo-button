@@ -66,13 +66,18 @@ Home Assistant.
 Repeat for each button. If a button was paired with this host before (for example
 after you reset it), the integration removes the old pairing and pairs again.
 
-### Press feedback options
+### Options
 
-On the integration card, select **Configure** to set the on/off colors and the
-feedback duration (default 2000 ms; set 0 to turn feedback off).
+On the integration card, select **Configure** to set:
 
-The button always plays its own short **blue flash** on every press. That's built
-into its firmware and can't be changed (yet); the feedback color appears right after it.
+- **Press feedback:** the on/off colors and the feedback duration (default 2000 ms;
+  set 0 to turn feedback off). The button always plays its own short **blue flash** on
+  every press. That's built into its firmware and can't be changed (yet); the feedback
+  color appears right after it.
+- **Keep awake** (off by default): the button goes to sleep after 10 idle minutes. The
+  next press only wakes it and isn't reported; the button reconnects about 2 seconds
+  later. With this on, Home Assistant asks the button for its status every 4 minutes,
+  which keeps it awake and connected. This likely drains the batteries faster.
 
 ## Example automations
 
@@ -204,7 +209,7 @@ length must be exact. Anything else is **silently ignored**, and nothing is ackn
 | `0x03` | button → host | status (3 bytes, meaning unknown); sent on connect, every few minutes, and in reply to `0x07` |
 | `0x04` | button → host | capability list on connect: accepts commands `02 05 06 07 09 0a` |
 | `0x06` | host → button | **play light animation now** (below) |
-| `0x07` | host → button | status request, no data |
+| `0x07` | host → button | status request, no data. Also keeps the button awake: it sleeps 10 minutes after the last one (a new connection doesn't reset that timer) |
 | `0x02` `0x05` `0x09` `0x0a` | host → button | take data; meaning unknown |
 
 Light animation (`0x06`):
@@ -226,12 +231,12 @@ notes on what was tried.
 
 - **Home Assistant OS** hasn't been tested yet; development was on Home Assistant Core
   on Debian. Both use the host's BlueZ over D-Bus, so it's expected to work. Reports welcome.
-- **Battery life** is unknown. The button keeps its Bluetooth connection open, as it
-  did with an Echo.
+- **Battery life** is unknown, especially with **Keep awake** on, which keeps the
+  button's Bluetooth connection open all the time.
 - **The built-in blue press flash** can't be disabled or recolored (yet).
 - **Multiple buttons** share one Bluetooth link and should work, but only one button
   has been tested.
-- After **long idle periods** (hours), the first press after the button wakes may be lost.
+- Without **Keep awake**, the press that wakes a sleeping button (10 idle minutes) is lost.
 
 ## Development
 

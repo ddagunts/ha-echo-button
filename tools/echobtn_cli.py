@@ -4,6 +4,7 @@
   python3 tools/echobtn_cli.py list            # Echo Buttons BlueZ has paired
   python3 tools/echobtn_cli.py pair            # hold the button until orange first
   python3 tools/echobtn_cli.py run AA:BB:...   # print presses
+  python3 tools/echobtn_cli.py run AA:BB:... --keep-awake  # ... and keep the button awake
 """
 
 import argparse
@@ -19,15 +20,18 @@ _pkg = types.ModuleType("echo_button")
 _pkg.__path__ = [str(Path(__file__).resolve().parent.parent / "custom_components" / "echo_button")]
 sys.modules["echo_button"] = _pkg
 
-from echo_button import bluez  # noqa: E402
+from echo_button import bluez, client as client_module  # noqa: E402
 from echo_button.client import EVENT_CONNECTION, EchoButtonClient  # noqa: E402
 from echo_button.link import BluezLink  # noqa: E402
 
 
-async def run(address: str) -> None:
+async def run(address: str, keep_awake: float | None) -> None:
     link = BluezLink()
     await link.start()
     client = EchoButtonClient(address, link)
+    if keep_awake is not None:
+        client_module.KEEP_AWAKE_SECONDS = keep_awake
+        client.keep_awake = True
 
     def on_event(event: str) -> None:
         ts = datetime.datetime.now().strftime("%H:%M:%S.%f")[:-3]
@@ -47,6 +51,8 @@ async def main() -> None:
     sub.add_parser("list")
     sub.add_parser("pair")
     run_p = sub.add_parser("run")
+    run_p.add_argument("--keep-awake", type=float, nargs="?", const=client_module.KEEP_AWAKE_SECONDS,
+                       metavar="SECONDS", help="send a status request this often (default %(const)s s)")
     run_p.add_argument("address")
     args = ap.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
@@ -59,7 +65,7 @@ async def main() -> None:
     elif args.cmd == "pair":
         print("paired:", *await bluez.pair_new_button())
     else:
-        await run(args.address)
+        await run(args.address, args.keep_awake)
 
 
 if __name__ == "__main__":

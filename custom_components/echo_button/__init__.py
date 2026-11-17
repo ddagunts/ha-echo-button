@@ -22,7 +22,7 @@ from homeassistant.helpers.typing import ConfigType
 
 from .bluez import BLUEZ_ERRORS
 from .client import EchoButtonClient
-from .const import DOMAIN, SERVICE_PLAY_ANIMATION
+from .const import CONF_KEEP_AWAKE, DEFAULT_KEEP_AWAKE, DOMAIN, SERVICE_PLAY_ANIMATION
 from .link import BluezLink
 from .protocol import MAX_REPEAT, MAX_STEP_MS, MAX_STEPS, parse_color
 
@@ -95,13 +95,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: EchoButtonConfigEntry) -
 
     data = EchoButtonData(EchoButtonClient(entry.data[CONF_ADDRESS], link, _LOGGER))
     entry.runtime_data = data
+    _apply_options(entry)
     try:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except BaseException:
         await _release_link(hass)
         raise
+    # Options take effect on the running client (the switch reads its own on each
+    # press), so saving them doesn't reload the entry and drop the connection.
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
     data.task = hass.async_create_background_task(data.client.run(), f"echo_button {data.client.address}")
     return True
+
+
+def _apply_options(entry: EchoButtonConfigEntry) -> None:
+    entry.runtime_data.client.keep_awake = bool(entry.options.get(CONF_KEEP_AWAKE, DEFAULT_KEEP_AWAKE))
+
+
+async def _async_options_updated(hass: HomeAssistant, entry: EchoButtonConfigEntry) -> None:
+    _apply_options(entry)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: EchoButtonConfigEntry) -> bool:

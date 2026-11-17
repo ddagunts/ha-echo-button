@@ -12,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigFlow, ConfigFlowResu
 from homeassistant.const import CONF_ADDRESS
 from homeassistant.core import callback
 from homeassistant.helpers.selector import (
+    BooleanSelector,
     ColorRGBSelector,
     NumberSelector,
     NumberSelectorConfig,
@@ -21,9 +22,11 @@ from homeassistant.helpers.selector import (
 from . import bluez
 from .const import (
     CONF_FEEDBACK_MS,
+    CONF_KEEP_AWAKE,
     CONF_OFF_COLOR,
     CONF_ON_COLOR,
     DEFAULT_FEEDBACK_MS,
+    DEFAULT_KEEP_AWAKE,
     DEFAULT_OFF_COLOR,
     DEFAULT_ON_COLOR,
     DOMAIN,
@@ -109,7 +112,7 @@ class EchoButtonConfigFlow(ConfigFlow, domain=DOMAIN):
 
 
 class EchoButtonOptionsFlow(OptionsFlow):
-    """Press-feedback colors and duration."""
+    """Press-feedback colors and duration, keep awake."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         if user_input is not None:
@@ -122,5 +125,7 @@ class EchoButtonOptionsFlow(OptionsFlow):
                                                     mode=NumberSelectorMode.BOX)),
             vol.Required(CONF_ON_COLOR, default=options.get(CONF_ON_COLOR, DEFAULT_ON_COLOR)): ColorRGBSelector(),
             vol.Required(CONF_OFF_COLOR, default=options.get(CONF_OFF_COLOR, DEFAULT_OFF_COLOR)): ColorRGBSelector(),
+            vol.Required(CONF_KEEP_AWAKE, default=options.get(CONF_KEEP_AWAKE, DEFAULT_KEEP_AWAKE)):
+                BooleanSelector(),
         })
         return self.async_show_form(step_id="init", data_schema=schema)

@@ -18,6 +18,7 @@ from .protocol import (
     MSG_CAPABILITIES,
     MSG_SET_LIGHT,
     MSG_STATUS,
+    MSG_STATUS_REQUEST,
     STATE_PRESSED,
     STATE_RELEASED,
     STX,
@@ -48,6 +49,10 @@ RELOOKUP_SECONDS = 2.0  # the button's device object went away; give BlueZ a mom
 SEND_ATTEMPTS = 100  # x 10 ms; frames are tiny, so the socket buffer is practically never full
 # One command lasts at most 255 x 65.5 s (~4.6 h); resend the steady light well before that.
 BASE_LIGHT_REFRESH_SECONDS = 3600.0
+# The button falls asleep 10 minutes after the last status request (reopening the
+# channel doesn't reset that), and the press that wakes it is lost. With keep_awake
+# on, a status request goes out this often: no visible effect, the button just answers.
+KEEP_AWAKE_SECONDS = 240.0
 OFF: Color = (0, 0, 0)
 
 
@@ -64,6 +69,7 @@ class EchoButtonClient:
         self.connected = False
         self.last_status: bytes | None = None  # type 0x03 data, meaning unknown (shown in diagnostics)
         self.capabilities: bytes | None = None  # type 0x04 data
+        self.keep_awake = False  # can change at any time; read before each keep-awake message
         self._link = link
         self._log = logger or _LOGGER
         self._listeners: list[Callable[[str], None]] = []
@@ -285,6 +291,7 @@ class EchoButtonClient:
             self._restore_base_soon()
         # else: commands need the button's serial, so _handle sends the steady color
         # once the button's first message brings it.
+        keeper = loop.create_task(self._keep_awake_loop())
         parser = FrameParser()
         try:
             while data := await chunks.get():
@@ -293,12 +300,24 @@ class EchoButtonClient:
                         self._handle(message, loop.time())
             self._log.info("Echo Button %s disconnected", self.address)
         finally:
+            keeper.cancel()
             self._fd = None
             loop.remove_reader(fd)
             os.close(fd)
             self._pressed_at = None
             self._cancel_base_timer()
             self._set_connected(False)
+
+    async def _keep_awake_loop(self) -> None:
+        """Runs for one connection: while keep_awake is on, ask for status every few minutes."""
+        while True:
+            await asyncio.sleep(KEEP_AWAKE_SECONDS)
+            if not self.keep_awake:
+                continue
+            try:
+                await self._send(MSG_STATUS_REQUEST, b"")
+            except (NotConnectedError, OSError, TimeoutError) as err:
+                self._log.debug("Echo Button %s: keep-awake request failed: %s", self.address, err)
 
     def _handle(self, message: GadgetMessage, now: float) -> None:
         if message.serial:
