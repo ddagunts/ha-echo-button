@@ -24,6 +24,7 @@ For each button you get:
 | `event.<button>_button` | Fires `press` (released within 1 s) or `long_press` (held 1 s or longer). |
 | `light.<button>_led` | The button's LED as a color light with brightness. It stays on until turned off, and feedback and animations return to it afterwards. |
 | `binary_sensor.<button>_connectivity` | Diagnostic: whether the button is connected. |
+| `sensor.<button>_battery` | Diagnostic: the battery level the button reports, in %. It updates when the button connects, every 10 minutes while connected, and with each Keep-awake request, but only from readings taken while the LED is dark (see [Known limitations](#known-limitations)). The last value is kept while the button sleeps. |
 
 There is also an **`echo_button.play_animation`** action for custom light animations
 (colors, durations, fades, repeats).
@@ -172,8 +173,11 @@ fixed-color steps.
   "Secure Simple Pairing" the button requires. Use a newer adapter.
 - **Connectivity stays off:** only one host can hold the button. Make sure no Echo or
   other computer is connected to it, then press the button once; it reconnects on its own.
-- **Debug logs:** add this to `configuration.yaml`, and include a diagnostics download
-  (device page → ⋮ → Download diagnostics) when filing an issue:
+- **Debug logs:** go to **Settings → Devices & services → Amazon Echo Button → ⋮ →
+  Enable debug logging**, reproduce the problem, then select **Disable debug logging**
+  to download the log. When filing an issue, include it along with a diagnostics
+  download (device page → ⋮ → Download diagnostics). To also capture startup, add this
+  to `configuration.yaml` instead:
   ```yaml
   logger:
     logs:
@@ -207,8 +211,8 @@ length must be exact. Anything else is **silently ignored**, and nothing is ackn
 | Type | Direction | Data |
 |---|---|---|
 | `0x01` | button → host | press/release: `data[3]` `02` = pressed, `03` = released; `data[8:11]` = the LED's R G B at that moment |
-| `0x03` | button → host | status (3 bytes, meaning unknown); sent on connect, every few minutes, and in reply to `0x07` |
-| `0x04` | button → host | capability list on connect: accepts commands `02 05 06 07 09 0a` |
+| `0x03` | button → host | status: `00 <battery> <reason>`. Battery is 0–100, read as a percentage and measured right then, so it sags while the LED is lit. Reason is `03` on connect and in reply to `0x07`, `00` when sent unprompted (every 10 minutes) |
+| `0x04` | button → host | capability list on connect: a count, then `<command, 16-bit> ff <01 = takes data, 00 = none>` for each of `02 05 06 07 09 0a` |
 | `0x06` | host → button | **play light animation now** (below) |
 | `0x07` | host → button | status request, no data. Also keeps the button awake: it sleeps 10 minutes after the last one (a new connection doesn't reset that timer) |
 | `0x02` `0x05` `0x09` `0x0a` | host → button | take data; meaning unknown |
@@ -234,6 +238,12 @@ notes on what was tried.
   on Debian. Both use the host's BlueZ over D-Bus, so it's expected to work. Reports welcome.
 - **Battery life** is unknown, especially with **Keep awake** on, which keeps the
   button's Bluetooth connection open all the time.
+- **The battery level** is the button's own reading. It looks like a percentage
+  (Duracells read about 90, older off-brand cells about 75), but the level at which
+  the button stops working isn't known yet. The reading drops while the LED is lit
+  (75 falls to about 52 at full red and to 0 at full white, while the button keeps
+  working), so only readings taken after the LED has been dark for 10 seconds are used.
+  With the LED entity on all the time, the level doesn't update.
 - **The built-in blue press flash** can't be disabled or recolored (yet).
 - **Multiple buttons** share one Bluetooth link and should work, but only one button
   has been tested.

@@ -72,6 +72,21 @@ def test_non_button_message_has_no_state():
 
 
 @pytest.mark.parametrize(
+    ("msg_type", "data", "level"),
+    [
+        (MSG_STATUS, STATUS, 91),  # brand-name cells, LED off
+        (MSG_STATUS, bytes.fromhex("000c03"), 12),  # full white LED on weaker cells
+        (MSG_STATUS, bytes.fromhex("004b00"), 75),  # sent unprompted
+        (MSG_STATUS, bytes.fromhex("006503"), None),  # over 100: not a level we know
+        (MSG_STATUS, bytes.fromhex("005b"), None),  # wrong length
+        (MSG_BUTTON, PRESSED, None),
+    ],
+)
+def test_battery_level_comes_from_status_messages_only(msg_type, data, level):
+    assert parse_message(encode_message(msg_type, SERIAL, data)).battery == level
+
+
+@pytest.mark.parametrize(
     ("steps", "repeat", "expected"),
     [
         # Each of these was sent to a real button and confirmed by eye.

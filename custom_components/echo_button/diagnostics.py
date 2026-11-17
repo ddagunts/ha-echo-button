@@ -22,6 +22,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry: ConfigE
                 "serial": client.serial,
                 "connected": client.connected,
                 "led_base_color": client.base_color,
+                "battery": client.battery,
                 "last_status": client.last_status.hex(" ") if client.last_status else None,
                 "capabilities": client.capabilities.hex(" ") if client.capabilities else None,
             },

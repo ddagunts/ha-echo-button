@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import math
 import os
 from collections.abc import Callable, Coroutine
 
@@ -37,6 +38,7 @@ _LOGGER = logging.getLogger(__name__)
 EVENT_PRESS = "press"
 EVENT_LONG_PRESS = "long_press"
 EVENT_CONNECTION = "connection"  # check client.connected
+EVENT_BATTERY = "battery"  # check client.battery
 
 LONG_PRESS_SECONDS = 1.0
 STALE_PRESS_SECONDS = 30.0  # a "pressed" with no "released" this long is dropped
@@ -49,6 +51,11 @@ RELOOKUP_SECONDS = 2.0  # the button's device object went away; give BlueZ a mom
 SEND_ATTEMPTS = 100  # x 10 ms; frames are tiny, so the socket buffer is practically never full
 # One command lasts at most 255 x 65.5 s (~4.6 h); resend the steady light well before that.
 BASE_LIGHT_REFRESH_SECONDS = 3600.0
+# The battery reading sags while the LED is lit and takes a few seconds to recover
+# (75 -> 52 at full red, back to 73-74 four seconds after going dark), so readings
+# only count once the LED has been dark this long.
+LED_SETTLE_SECONDS = 10.0
+PRESS_FLASH_SECONDS = 2.0  # the built-in blue flash on every press; its exact length is unknown
 OFF: Color = (0, 0, 0)
 
 
@@ -63,8 +70,9 @@ class EchoButtonClient:
         self.address = address.upper()
         self.serial: str | None = None
         self.connected = False
-        self.last_status: bytes | None = None  # type 0x03 data, meaning unknown (shown in diagnostics)
+        self.last_status: bytes | None = None  # type 0x03 data (shown in diagnostics)
         self.capabilities: bytes | None = None  # type 0x04 data
+        self.battery: int | None = None  # last battery level read while the LED was dark
         self._link = link
         self._log = logger or _LOGGER
         self._listeners: list[Callable[[str], None]] = []
@@ -82,6 +90,9 @@ class EchoButtonClient:
         self._base_color: Color | None = None  # steady LED color, None = off
         self._base_timer: asyncio.TimerHandle | None = None  # sends the steady color again
         self._led_commands = 0  # LED commands sent so far; lets a late resend see it was overtaken
+        # When the LED last went (or will go) dark, in loop time. A steady color counts as
+        # lit regardless. Starts out as "long ago": a button that just woke up is dark.
+        self._led_dark_at = -math.inf
         self._keep_awake_seconds: float | None = None  # None = off
         self._keeper: asyncio.Task | None = None  # sends the keep-awake requests while connected
         self._tasks: set[asyncio.Task] = set()
@@ -121,7 +132,9 @@ class EchoButtonClient:
         """
         data = encode_set_light(steps, repeat)
         await self._send(MSG_SET_LIGHT, data)
-        self._sent_light(sum(step.duration_ms for step in steps) * repeat / 1000)
+        seconds = sum(step.duration_ms for step in steps) * repeat / 1000
+        self._led_dark_at = asyncio.get_running_loop().time() + seconds  # it replaces whatever was playing
+        self._sent_light(seconds)
 
     async def set_base_light(self, color: Color | None) -> None:
         """Set the steady LED color (None = off). Kept across reconnects; sent now if connected."""
@@ -135,6 +148,7 @@ class EchoButtonClient:
         else:
             steps, repeat = [LightStep(MAX_STEP_MS, self._base_color)], MAX_REPEAT
         await self._send(MSG_SET_LIGHT, encode_set_light(steps, repeat))
+        self._led_dark_at = asyncio.get_running_loop().time()  # off now, or lit by the steady color
         self._sent_light(BASE_LIGHT_REFRESH_SECONDS)
 
     def _sent_light(self, seconds: float) -> None:
@@ -355,12 +369,15 @@ class EchoButtonClient:
                 self._restore_base_soon()
         if message.type == MSG_STATUS:
             self.last_status = message.data
+            if (level := message.battery) is not None:
+                self._battery_reading(level, now)
         elif message.type == MSG_CAPABILITIES:
             self.capabilities = message.data
         if message.type != MSG_BUTTON:
             self._log.debug("Echo Button %s message type %#04x data %s", self.address, message.type,
                             message.data.hex(" "))
             return
+        self._led_dark_at = max(self._led_dark_at, now + PRESS_FLASH_SECONDS)
         state = message.button_state
         if state == STATE_PRESSED:
             # Also sent once on connect without a matching release, so only
@@ -374,3 +391,16 @@ class EchoButtonClient:
             event = EVENT_LONG_PRESS if held >= LONG_PRESS_SECONDS else EVENT_PRESS
             self._log.debug("Echo Button %s %s (held %.2f s)", self.address, event, held)
             self._emit(event)
+
+    def _battery_reading(self, level: int, now: float) -> None:
+        """Keep a battery reading only if the LED was dark and had settled when it was taken.
+
+        With a steady LED color on all the time, the level only updates once it's turned off.
+        """
+        if self._base_color is not None or now < self._led_dark_at + LED_SETTLE_SECONDS:
+            self._log.debug("Echo Button %s: battery %d read with the LED lit (or just after); not used",
+                            self.address, level)
+            return
+        if level != self.battery:
+            self.battery = level
+            self._emit(EVENT_BATTERY)

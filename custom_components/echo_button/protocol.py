@@ -10,8 +10,17 @@ Payload (Echo Button's pre-protobuf format, reverse-engineered):
 Button -> host message types:
     0x01 button state. data[3]: 0x02 = pressed, 0x03 = released;
          data[8:11]: R G B the LED was showing at that moment
-    0x03 status (on connect, every few minutes, and in reply to 0x07)
-    0x04 capability list (on connect): commands 02 05 06 07 09 0a
+    0x03 status, 3 bytes: 00 | battery | reason
+         battery: 0-100, taken to be a percentage (brand-name cells read about 90,
+         older off-brand ones about 75). It is measured as the message is built,
+         so it sags while the LED is lit (from 75 to 52 at full red, 0-50 at full
+         white, with the button still working) and takes a few seconds to recover
+         once the LED goes dark.
+         reason: 0x03 on connect and in reply to 0x07; 0x00 when sent unprompted,
+         which happens every 10 minutes. Byte 0 has always been 0x00.
+    0x04 capability list (on connect): count, then per command
+         <command, u16 big-endian> ff <01 = takes data, 00 = doesn't>:
+         02 05 06 07 09 0a (only 07 takes no data)
 
 Host -> button commands (the serial must be the button's own; the button
 checks lengths strictly and silently ignores anything malformed):
@@ -68,6 +77,13 @@ class GadgetMessage:
     def button_state(self) -> int | None:
         if self.type == MSG_BUTTON and len(self.data) >= 4:
             return self.data[3]
+        return None
+
+    @property
+    def battery(self) -> int | None:
+        """Battery level (0-100) from a status message, as measured right then (see the module doc)."""
+        if self.type == MSG_STATUS and len(self.data) == 3 and self.data[1] <= 100:
+            return self.data[1]
         return None
 
 

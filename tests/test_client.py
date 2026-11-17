@@ -10,7 +10,15 @@ import echo_button.client
 import pytest
 from dbus_fast.errors import AuthError
 from echo_button.bluez import DeviceNotFoundError
-from echo_button.client import EVENT_LONG_PRESS, EVENT_PRESS, EchoButtonClient, NotConnectedError
+from echo_button.client import (
+    EVENT_BATTERY,
+    EVENT_LONG_PRESS,
+    EVENT_PRESS,
+    LED_SETTLE_SECONDS,
+    PRESS_FLASH_SECONDS,
+    EchoButtonClient,
+    NotConnectedError,
+)
 from echo_button.protocol import (
     MAX_REPEAT,
     MAX_STEP_MS,
@@ -92,6 +100,64 @@ def test_status_is_kept_for_diagnostics():
     client, _ = make_client()
     feed(client, MSG_STATUS, bytes.fromhex("005b03"), 0.0)
     assert client.last_status == bytes.fromhex("005b03")
+
+
+def status(level: int) -> bytes:
+    return bytes([0x00, level, 0x03])
+
+
+def test_battery_skips_readings_taken_during_and_just_after_a_press_flash():
+    client, events = make_client()
+    feed(client, MSG_STATUS, status(75), 100.0)
+    feed(client, MSG_STATUS, status(75), 200.0)  # unchanged: no second event
+    assert client.battery == 75
+    assert events == [EVENT_BATTERY]
+
+    feed(client, MSG_BUTTON, PRESSED, 300.0)
+    feed(client, MSG_BUTTON, RELEASED, 300.3)
+    settled = 300.3 + PRESS_FLASH_SECONDS + LED_SETTLE_SECONDS
+    feed(client, MSG_STATUS, status(48), settled - 0.1)
+    assert client.battery == 75
+    feed(client, MSG_STATUS, status(76), settled)
+    assert client.battery == 76
+    assert events == [EVENT_BATTERY, EVENT_PRESS, EVENT_BATTERY]
+
+    feed(client, MSG_STATUS, bytes.fromhex("006503"), 1000.0)  # not a level
+    assert client.battery == 76
+
+
+def test_battery_skips_readings_while_the_led_is_lit():
+    async def scenario():
+        client, events = make_client()
+        ours, button = connect(client)
+        now = asyncio.get_running_loop().time
+        feed(client, MSG_STATUS, status(75), now())  # dark since the button woke up: counts
+        assert client.battery == 75
+
+        await client.set_base_light(STEADY)
+        feed(client, MSG_STATUS, status(52), now() + 3600)  # a steady color is lit however long it's on
+        assert client.battery == 75
+
+        await client.set_base_light(None)
+        off = now()
+        feed(client, MSG_STATUS, status(73), off + LED_SETTLE_SECONDS - 0.1)  # still recovering
+        assert client.battery == 75
+        feed(client, MSG_STATUS, status(74), off + LED_SETTLE_SECONDS)
+        assert client.battery == 74
+
+        await client.play_animation(RED)  # 300 ms, then dark
+        dark = now() + 0.3
+        feed(client, MSG_STATUS, status(52), dark + LED_SETTLE_SECONDS - 0.1)
+        assert client.battery == 74
+        feed(client, MSG_STATUS, status(75), dark + LED_SETTLE_SECONDS)
+        assert client.battery == 75
+        assert events == [EVENT_BATTERY] * 3
+
+        client._cancel_base_timer()
+        ours.close()
+        button.close()
+
+    asyncio.run(scenario())
 
 
 def test_led_commands_need_a_connection():
