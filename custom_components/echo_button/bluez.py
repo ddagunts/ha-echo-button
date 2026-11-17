@@ -140,9 +140,6 @@ class Bluez:
         body = await self.call("/", "org.freedesktop.DBus.ObjectManager", "GetManagedObjects")
         return unwrap(body[0])
 
-    async def adapter_path(self) -> str:
-        return first_adapter(await self.objects())
-
     async def set_property(self, path, interface, name, variant) -> None:
         await self.call(path, "org.freedesktop.DBus.Properties", "Set", "ssv", [interface, name, variant])
 

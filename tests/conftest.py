@@ -1,6 +1,6 @@
 """Make custom_components/echo_button importable as `echo_button` without Home Assistant.
 
-protocol.py, bluez.py, link.py and client.py don't import Home Assistant, so they
+protocol.py, bluez.py, rfcomm.py, link.py and client.py don't import Home Assistant, so they
 can be tested with just pytest and dbus-fast installed.
 """
 

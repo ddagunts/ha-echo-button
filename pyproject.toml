@@ -16,5 +16,4 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # dbus-fast reads D-Bus signatures from these string annotations ("o", "s", ...).
 "custom_components/echo_button/bluez.py" = ["F821", "F722", "UP037"]
-"custom_components/echo_button/link.py" = ["F821", "F722", "UP037"]
 "research/*.py" = ["F821", "F722", "UP", "E501", "E741", "SIM", "B", "RUF", "PIE"]
