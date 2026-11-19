@@ -24,10 +24,17 @@ Button -> host message types:
 
 Host -> button commands (the serial must be the button's own; the button
 checks lengths strictly and silently ignores anything malformed):
-    0x06 play light animation now:
+    0x06 light animation:
          01 01 <repeat 1-255> <step count> + per step:
          <duration ms, u16 big-endian> <R> <G> <B> <blend: 01 = fade into this color>
-         The button's built-in blue press flash still plays over it.
+         [+ <trigger> <delay u16 big-endian>]
+         Without the 3-byte trailer (or with trigger 0) it plays now. Trigger 2 stores it
+         as the button-down animation, replacing the built-in press flash (stock: 100 ms
+         blue, 100 ms off); nothing plays when it is sent. It survives reconnects, but
+         the button reloads its default on its own state changes (pairing, reboot), so
+         the client sends it again on every connect.
+         Trigger 1 is button-up. Found in the firmware (research/app_map.md) and tested
+         on a button. Triggers 3/4 have tiny unchecked buffers: never send them.
     0x07 status request (no data) -> replies with 0x03; also keeps the button awake
     0x02 0x05 0x09 0x0a: take data, meaning unknown
 
@@ -52,8 +59,14 @@ STATE_PRESSED = 0x02
 STATE_RELEASED = 0x03
 
 MAX_STEPS = 41  # the data length field is one byte: 4 + 6 * 41 = 250
+MAX_TRIGGER_STEPS = 40  # with the 3-byte trigger trailer: 4 + 6 * 40 + 3 = 247
 MAX_STEP_MS = 0xFFFF
 MAX_REPEAT = 255
+
+TRIGGER_BUTTON_UP = 1
+TRIGGER_BUTTON_DOWN = 2  # the press flash
+STOCK_PRESS_COLOR = (0, 0, 255)
+PRESS_FLASH_MS = 100  # stock: 100 ms of color, then 100 ms off
 
 SLEEP_SECONDS = 600
 
@@ -142,9 +155,13 @@ def encode_message(msg_type: int, serial: str, data: bytes) -> bytes:
             + bytes([0x01, len(data)]) + data)
 
 
-def encode_set_light(steps: list[LightStep], repeat: int = 1) -> bytes:
-    if not 1 <= len(steps) <= MAX_STEPS:
-        raise ValueError(f"an animation needs 1-{MAX_STEPS} steps")
+def encode_set_light(steps: list[LightStep], repeat: int = 1, trigger: int | None = None) -> bytes:
+    """The 0x06 data. `trigger` None plays now; TRIGGER_BUTTON_DOWN/UP stores it for presses."""
+    if trigger not in (None, TRIGGER_BUTTON_UP, TRIGGER_BUTTON_DOWN):
+        raise ValueError("only the button-down and button-up triggers are safe to send")
+    max_steps = MAX_STEPS if trigger is None else MAX_TRIGGER_STEPS
+    if not 1 <= len(steps) <= max_steps:
+        raise ValueError(f"an animation needs 1-{max_steps} steps")
     if not 1 <= repeat <= MAX_REPEAT:
         raise ValueError(f"repeat must be 1-{MAX_REPEAT}")
     data = bytearray([0x01, 0x01, repeat, len(steps)])
@@ -154,7 +171,16 @@ def encode_set_light(steps: list[LightStep], repeat: int = 1) -> bytes:
         if len(step.color) != 3 or not all(0 <= c <= 255 for c in step.color):
             raise ValueError("color must be three values 0-255")
         data += bytes([step.duration_ms >> 8, step.duration_ms & 0xFF, *step.color, 1 if step.blend else 0])
+    if trigger is not None:
+        data += bytes([trigger, 0x00, 0x00])
     return bytes(data)
+
+
+def press_flash_steps(color: Color) -> list[LightStep]:
+    """The press flash in the stock shape; black means no visible flash."""
+    if tuple(color) == (0, 0, 0):
+        return [LightStep(1, (0, 0, 0))]
+    return [LightStep(PRESS_FLASH_MS, tuple(color)), LightStep(PRESS_FLASH_MS, (0, 0, 0))]
 
 
 def parse_color(value: object) -> Color:

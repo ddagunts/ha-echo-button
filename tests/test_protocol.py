@@ -159,3 +159,22 @@ def test_message_with_an_unusable_serial_is_dropped():
     for bad_serial in (b"G0\xff0AB0000000000", b"G000AB000000000\x00"):
         payload = bytes([0x01, MSG_STATUS, 0x01, len(bad_serial)]) + bad_serial + bytes([0x01, len(STATUS)]) + STATUS
         assert parse_message(payload) is None
+
+
+def test_set_light_with_trigger_matches_the_firmwares_own_press_flash():
+    # Byte-for-byte the default press-flash record in the stock firmware (data @0x2200a5):
+    # 100 ms blue, 100 ms off, trigger 2 (button down), delay 0. Hardware-verified with other colors.
+    from echo_button.protocol import STOCK_PRESS_COLOR, TRIGGER_BUTTON_DOWN, press_flash_steps
+    data = encode_set_light(press_flash_steps(STOCK_PRESS_COLOR), trigger=TRIGGER_BUTTON_DOWN)
+    assert data == bytes.fromhex("01010102 00640000ff00 006400000000 020000")
+
+
+def test_trigger_limits():
+    from echo_button.protocol import MAX_TRIGGER_STEPS, TRIGGER_BUTTON_UP
+    step = LightStep(10, (1, 2, 3))
+    assert len(encode_set_light([step] * MAX_TRIGGER_STEPS, trigger=TRIGGER_BUTTON_UP)) == 247  # fits one length byte
+    with pytest.raises(ValueError):
+        encode_set_light([step] * (MAX_TRIGGER_STEPS + 1), trigger=TRIGGER_BUTTON_UP)
+    for unsafe in (0, 3, 4):  # 3 and 4 have unchecked 2-3 step buffers in the firmware
+        with pytest.raises(ValueError):
+            encode_set_light([step], trigger=unsafe)

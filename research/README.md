@@ -1,8 +1,9 @@
 # Research tools
 
 The scripts used to work out the Echo Button protocol. They are here so others can
-continue, for example to decode commands `0x02`, `0x05`, `0x09` and `0x0a`; one of
-them may control the built-in blue press flash. See the main README for what is
+continue, for example to decode commands `0x02`, `0x05`, `0x09` and `0x0a`. The
+built-in blue press flash turned out to be a stored `0x06` animation (see
+[`app_map.md`](app_map.md#led-and-press-feedback)). See the main README for what is
 known.
 
 Run them on Linux with BlueZ and a Bluetooth 2.1+ adapter that supports Classic.
@@ -15,6 +16,31 @@ gadget channel.
 | `echobtn_gadget.py` | Opens the gadget channel (RFCOMM 4), decodes every frame, and can send an Alexa Gadgets `Discover` directive (which the button ignores). |
 | `echobtn_lab.py` | Holds the gadget channel open and sends commands written to a FIFO, one per line (`msg <type> <data-hex>`), logging all replies. |
 | `light_sweep.py` | Feeds batches of candidate light commands to `echobtn_lab.py`. This is how command `0x06` was found. |
+| `press_anim_test.py` | Sends one `0x06` animation with a trigger trailer (button‑down/up) and logs presses, to test setting the press flash over the protocol. |
+
+### Firmware access (serial pads)
+
+A separate line of work reads and writes the button's firmware directly through the
+CYW20735B0's test pads, over its HCI UART. The hands-on procedure is
+[`../firmware/GUIDE.md`](../firmware/GUIDE.md); the chip, board, pin and flash facts are in
+[`firmware_access.md`](firmware_access.md); the state of things in [`STATUS.md`](STATUS.md).
+These tools only need `pyserial`:
+
+| Script | What it does |
+|---|---|
+| `echobtn_resume_flash.py` | **The flasher**: erases, writes and verifies whole 4 KB sectors of a full image, resuming across the ~2 s press windows of a unit that doesn't boot; checks the unit's serial first; never writes sector 0. |
+| `echobtn_hci_dump.py` | Dumps ROM/RAM/serial flash via `READ_RAM` (stock firmware awake). Survives adapter re‑enumeration. |
+| `echobtn_trace.py` | Reads AButton debug traces and the stock firmware's text output from the UART. |
+| `echobtn_resume_read.py` | Resumable chunked reads in press windows. |
+| `echobtn_window_probe.py` | Handshake and timing probe for the press window. |
+| `echobtn_hci_flash.py` | The older flasher; holds the sector‑erase stub and the Intel‑HEX parser. |
+| `ds_tool.py` | Parses and repacks the serial‑flash config sections (the DS holds the application). |
+| `fw_mod.py` | Builds modified stock firmware, e.g. `--press-color ffffff` for a white press flash. |
+| `install_wiced_b0_sdk.sh` | Decrypts and installs the WICED Studio 6.0 **20735‑B0** platform (the B0 SDK and its ROM symbols) next to a base install. |
+
+Keep your own dumps **private** and out of git (`.gitignore` excludes `dump/`): sector 0
+holds the button's BD_ADDR, calibration and serials, and sector `0x2000` its pairing link
+keys. The stock firmware isn't published here.
 
 Recording traffic with `btmon -w capture.btsnoop` (needs `CAP_NET_RAW`) and opening
 it in Wireshark is the best way to see everything. **Don't publish raw captures.**
@@ -38,6 +64,10 @@ They contain the pairing link key and the addresses and names of nearby devices.
   with a zero delay added as a u16 in front, a u16 after the first two header bytes, a
   u32 in front, a u16 at the end and a u8 in front, and with the body's first one or two
   bytes removed. One press each: every press still gave only the blue flash.
+  (The firmware later showed why: the trigger is a **3‑byte** trailer after the steps,
+  `<trigger> <delay u16 BE>`, and fewer than 3 trailing bytes are ignored. Trigger `2` is
+  button‑down: sending one turned the press flash green, then white, on a stock button.
+  See [`STATUS.md`](STATUS.md) and [`app_map.md`](app_map.md#led-and-press-feedback).)
 - The LED color in press/release messages (`data[8:11]`) shows host animations. The
   built-in blue flash showed up there only once in about 30 presses, on a bounce right
   at release (`00 00 ff`), so that field can't tell whether a stored animation ran.
@@ -91,12 +121,13 @@ until solid orange and retrying works.
 
 Cypress CYW20735: a Cortex-M4 that runs the Bluetooth stack and the application,
 with Classic and LE Bluetooth, PWM, a 10-bit ADC (the likely battery source), GPIO,
-I2C, SPI and UART. The two AAA cells are in parallel (1.5 V), boosted to 3.3 V. Per
-[TechInfoDepot](https://techinfodepot.shoutwiki.com/wiki/Amazon_Echo_Button_(H5V83Y)),
-the LED is on P27/P28/P29 (R/G/B) and the button on P11, and test pads TMF1–12 are
-reachable from the battery compartment: TMF1 3.3 V, TMF2 GND, TMF3 battery, TMF7 button,
-TMF8 SPI MOSI, TMF9–12 UART TX/CTS/RX/RTS. There is also an SWD header. Those are the
-way to read or replace the firmware. Teardowns:
+I2C, SPI and UART. The two AAA cells are in parallel (1.5 V), boosted to 3.3 V; a press
+powers the board for about 2 s and the firmware keeps it on with **P5**. Rev-1 pins (from the
+stock firmware, see [`firmware_access.md`](firmware_access.md#board-pins-and-power-rev-1-verified)):
+LED on P27/P28/P29 (R/G/B), button on **P6** (TechInfoDepot's "P11" is wrong), battery on ADC
+P0 behind a divider switched by P13. Test pads TMF1–22 are reachable from the battery
+compartment: TMF1 3.3 V, TMF2 GND, TMF3 battery, TMF7 button, TMF8 SPI MOSI, TMF9–12 UART
+TX/CTS/RX/RTS. SWD is on J2, a Tag-Connect footprint. Teardowns:
 [mpetroff.net](https://mpetroff.net/2017/12/amazon-echo-button-teardown/),
 [Medium](https://medium.com/@decrocksam/amazon-echo-buttons-teardown-9f066a84f156).
 FCC ID UUU-4612.

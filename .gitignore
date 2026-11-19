@@ -10,3 +10,30 @@ __pycache__/
 research/captures/
 *.btsnoop
 *.log
+
+# Serial-flash dumps contain the BD_ADDR, link keys and board-unique config.
+# Keep them local; never commit.
+dump/
+*.bin
+
+# Board photos and videos of the units are private too (camera originals carry location and
+# device metadata). Published, stripped copies live in firmware/images/.
+/PXL_*
+/IMG_*
+*.heic
+*.HEIC
+*.mov
+*.MOV
+
+# Firmware build outputs (regenerate with firmware/build.sh).
+firmware/out/
+
+# ...except the published AButton images (generic: no unit identity).
+!firmware/prebuilt/abutton-*.bin
+
+# The sector flasher's progress files hold the unit's factory serial.
+*.state
+*.state.tmp
+
+# Cypress SDK files (the B0 minidriver): get them from the SDK, never commit them.
+minidriver-*.hex

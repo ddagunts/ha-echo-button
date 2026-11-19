@@ -22,7 +22,9 @@ from .protocol import (
     MSG_STATUS_REQUEST,
     STATE_PRESSED,
     STATE_RELEASED,
+    STOCK_PRESS_COLOR,
     STX,
+    TRIGGER_BUTTON_DOWN,
     Color,
     FrameParser,
     GadgetMessage,
@@ -31,6 +33,7 @@ from .protocol import (
     encode_message,
     encode_set_light,
     parse_message,
+    press_flash_steps,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -88,6 +91,7 @@ class EchoButtonClient:
         self._dev_path: str | None = None  # BlueZ device object, on the adapter holding the pairing
         self._adapter: str | None = None  # that adapter's Bluetooth address
         self._base_color: Color | None = None  # steady LED color, None = off
+        self._press_color: Color = STOCK_PRESS_COLOR  # the button's own flash on each press
         self._base_timer: asyncio.TimerHandle | None = None  # sends the steady color again
         self._led_commands = 0  # LED commands sent so far; lets a late resend see it was overtaken
         # When the LED last went (or will go) dark, in loop time. A steady color counts as
@@ -150,6 +154,32 @@ class EchoButtonClient:
         await self._send(MSG_SET_LIGHT, encode_set_light(steps, repeat))
         self._led_dark_at = asyncio.get_running_loop().time()  # off now, or lit by the steady color
         self._sent_light(BASE_LIGHT_REFRESH_SECONDS)
+
+    @property
+    def press_color(self) -> Color:
+        return self._press_color
+
+    def set_press_color(self, color: Color) -> None:
+        """Set the button's built-in press flash (black = none). Sent now if connected, and on every connect.
+
+        This only stores an animation on the button (command 0x06 with the button-down
+        trigger): it plays on the next press, so it doesn't count as an LED command.
+        """
+        self._press_color = tuple(color)
+        if self._fd is not None and self.serial is not None:
+            self._spawn(self._send_press_flash())
+
+    async def _send_press_flash(self) -> None:
+        data = encode_set_light(press_flash_steps(self._press_color), trigger=TRIGGER_BUTTON_DOWN)
+        try:
+            await self._send(MSG_SET_LIGHT, data)
+        except (NotConnectedError, OSError, TimeoutError) as err:
+            self._log.debug("Echo Button %s: could not set the press flash: %s", self.address, err)
+
+    def _channel_ready(self) -> None:
+        """The gadget channel is open and the serial known: (re)apply the button-side LED settings."""
+        self._spawn(self._send_press_flash())
+        self._restore_base_soon()
 
     def _sent_light(self, seconds: float) -> None:
         """After each LED command that went out: send the steady color again in `seconds`.
@@ -340,9 +370,9 @@ class EchoButtonClient:
         self._retrying = False
         self._set_connected(True)
         if self.serial is not None:
-            self._restore_base_soon()
-        # else: commands need the button's serial, so _handle sends the steady color
-        # once the button's first message brings it.
+            self._channel_ready()
+        # else: commands need the button's serial, so _handle sends the press flash and
+        # steady color once the button's first message brings it.
         self._start_keeper()
         parser = FrameParser()
         try:
@@ -366,7 +396,7 @@ class EchoButtonClient:
             self.serial = message.serial
             self._serial_seen.set()
             if first and self._fd is not None:
-                self._restore_base_soon()
+                self._channel_ready()
         if message.type == MSG_STATUS:
             self.last_status = message.data
             if (level := message.battery) is not None:

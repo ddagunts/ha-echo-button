@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Choose an Echo Button",
-        "description": "These Echo Buttons are already paired with this Home Assistant host.",
+        "description": "Echo Buttons already paired with this host (stock firmware), and buttons running AButton seen over Bluetooth LE.",
         "data": {
           "address": "Button"
         }
@@ -11,6 +11,10 @@
       "pair": {
         "title": "Pair an Echo Button",
         "description": "1. If the button is paired with an Echo, unplug that Echo for now.\n2. Hold the Echo Button down until it glows **orange**. That takes 5–20 seconds; keep holding through any blue or green flashes.\n3. Release it, then select **Submit**. The button stays in pairing mode for a couple of minutes."
+      },
+      "bluetooth_confirm": {
+        "title": "Add {name}",
+        "description": "**{name}** runs AButton, the open Echo Button firmware. Home Assistant will control its LED and settings over Bluetooth LE. Its presses and battery come through the **BTHome** integration, which discovers it separately."
       }
     },
     "progress": {
@@ -22,16 +26,18 @@
       "bluez_unavailable": "Could not reach the Bluetooth service (BlueZ) on this host."
     },
     "abort": {
-      "already_configured": "This Echo Button is already set up.",
-      "bluez_unavailable": "Could not reach the Bluetooth service (BlueZ). This integration needs a Bluetooth adapter on the Home Assistant host."
-    }
+      "already_configured": "This Echo Button is already set up (if it now runs AButton, its entry was switched over).",
+      "bluez_unavailable": "Could not reach the Bluetooth service (BlueZ), and no AButton was found. Stock buttons need a Bluetooth adapter on the Home Assistant host; AButtons need a connectable adapter or an ESPHome Bluetooth proxy in active mode."
+    },
+    "flow_title": "{name}"
   },
   "options": {
     "step": {
       "init": {
         "title": "Echo Button options",
-        "description": "After each short press, the button glows the toggle's new state color, then fades back. The button's own blue flash on press can't be turned off.",
+        "description": "The button flashes the press flash color the moment it's pressed (stock: blue; black turns the flash off). Then, after each short press, it glows the toggle's new state color and fades back.",
         "data": {
+          "press_color": "Press flash color",
           "feedback_ms": "Feedback duration (0 = no feedback)",
           "on_color": "Color when turned on",
           "off_color": "Color when turned off",
@@ -39,8 +45,35 @@
           "keep_awake_seconds": "Keep-awake interval"
         },
         "data_description": {
+          "press_color": "The button's own short flash on every press. Home Assistant sets it each time the button connects. Black turns it off, which also keeps it from disturbing the feedback below.",
           "keep_awake": "The button goes to sleep after 10 idle minutes. The next press only wakes it and isn't reported; it reconnects about 2 seconds later. With this on, Home Assistant asks the button for its status regularly so it stays awake. This likely drains the batteries faster.",
           "keep_awake_seconds": "How often to ask for status while Keep awake is on (10–540 s). Must stay under the button's 10-minute sleep timer."
+        }
+      },
+      "abutton": {
+        "title": "AButton settings",
+        "description": "These settings are stored on the button. They are sent right away if the button is in range, otherwise on its next connection.",
+        "data": {
+          "press_color": "LED color while held",
+          "brightness": "LED brightness",
+          "long_press_ms": "Long press after",
+          "multi_click_ms": "Double / triple click window",
+          "advert_interval_ms": "Advert interval",
+          "low_battery_pct": "Low battery below",
+          "low_battery_warning": "Low battery warning",
+          "boot_battery": "Show battery on power-up",
+          "restore_led": "Keep LED color across restarts"
+        },
+        "data_description": {
+          "press_color": "Black turns the press light off.",
+          "brightness": "Scales every LED color, including the press light and animations (1–255).",
+          "long_press_ms": "How long the button must be held for a long press.",
+          "multi_click_ms": "How long the button waits for another click before reporting a press, double press or triple press. Shorter is snappier; longer is easier to double-click.",
+          "advert_interval_ms": "How often the button broadcasts while idle. Longer saves battery; presses are always sent at once.",
+          "low_battery_pct": "The battery level that counts as low.",
+          "low_battery_warning": "Two red blinks after each press while the battery is low.",
+          "boot_battery": "The power-up blink is green, amber or red by battery level instead of white.",
+          "restore_led": "The button keeps the LED entity's color after a battery change or restart."
         }
       }
     }
@@ -77,11 +110,11 @@
       "fields": {
         "steps": {
           "name": "Steps",
-          "description": "List of up to 41 steps. Each has a color ([r, g, b] or \"#rrggbb\"), a duration in milliseconds (1–65535) and an optional fade (true fades into this step's color)."
+          "description": "List of steps (up to 41 on stock firmware, 40 on AButton). Each has a color ([r, g, b] or \"#rrggbb\"), a duration in milliseconds (1–65535) and an optional fade (true fades into this step's color)."
         },
         "repeat": {
           "name": "Repeat",
-          "description": "How many times to play the sequence (1–255)."
+          "description": "How many times to play the sequence (1–255). 0 plays it until the light is changed (AButton only)."
         }
       }
     }

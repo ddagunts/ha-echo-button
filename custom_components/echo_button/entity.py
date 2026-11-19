@@ -8,7 +8,7 @@ from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, DeviceIn
 from homeassistant.helpers.entity import Entity
 
 from .client import EchoButtonClient
-from .const import DOMAIN
+from .const import CONF_KIND, DOMAIN, KIND_ABUTTON
 
 
 class EchoButtonEntity(Entity):
@@ -20,11 +20,14 @@ class EchoButtonEntity(Entity):
         self._client: EchoButtonClient = entry.runtime_data.client
         address = self._client.address
         self._attr_unique_id = f"{address}_{key}"
+        abutton = entry.data.get(CONF_KIND) == KIND_ABUTTON
+        # The Bluetooth connection tuple puts an AButton's entities on the same device as the
+        # BTHome integration's (presses, battery) for that address.
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, address)},
             connections={(CONNECTION_BLUETOOTH, address)},
             manufacturer="Amazon",
-            model="Echo Button",
+            model="Echo Button (AButton firmware)" if abutton else "Echo Button",
             name=entry.title,
         )
 

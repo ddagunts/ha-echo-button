@@ -1,13 +1,25 @@
 {
   "domain": "echo_button",
   "name": "Amazon Echo Button",
-  "codeowners": ["@ddagunts"],
+  "bluetooth": [
+    {
+      "service_uuid": "0e5a1000-a8b9-4c3b-9d1a-ab7ff0ab7700",
+      "connectable": true
+    }
+  ],
+  "codeowners": [
+    "@ddagunts"
+  ],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": [
+    "bluetooth_adapters"
+  ],
   "documentation": "https://github.com/ddagunts/ha-echo-button",
   "integration_type": "device",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/ddagunts/ha-echo-button/issues",
-  "requirements": ["dbus-fast"],
-  "version": "0.1.0"
+  "requirements": [
+    "dbus-fast"
+  ],
+  "version": "0.2.1"
 }

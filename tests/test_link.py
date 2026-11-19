@@ -110,9 +110,9 @@ def test_adapter_address_comes_from_the_devices_parent_adapter():
 def test_rfcomm_address_is_packed_like_sockaddr_rc():
     from echo_button.rfcomm import sockaddr_rc
 
-    packed = bytes(sockaddr_rc("00:71:47:F9:9C:63", 4))
+    packed = bytes(sockaddr_rc("00:11:22:33:44:66", 4))
     assert packed[:2] == (31).to_bytes(2, "little")  # AF_BLUETOOTH
-    assert packed[2:8] == bytes.fromhex("639cf9477100")  # bdaddr is little-endian
+    assert packed[2:8] == bytes.fromhex("664433221100")  # bdaddr is little-endian
     assert packed[8] == 4
     with pytest.raises(ValueError):
         sockaddr_rc("00:71:47", 4)

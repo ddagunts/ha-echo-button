@@ -26,12 +26,15 @@ from echo_button.protocol import (
     MSG_SET_LIGHT,
     MSG_STATUS,
     MSG_STATUS_REQUEST,
+    STOCK_PRESS_COLOR,
+    TRIGGER_BUTTON_DOWN,
     FrameParser,
     LightStep,
     encode_frame,
     encode_message,
     encode_set_light,
     parse_message,
+    press_flash_steps,
 )
 
 SERIAL = "G000AB0000000000"
@@ -43,6 +46,8 @@ STEADY = (160, 0, 255)
 STEADY_DATA = encode_set_light([LightStep(MAX_STEP_MS, STEADY)], MAX_REPEAT)
 GREEN = [LightStep(50, (0, 255, 0))]
 RED = [LightStep(300, (255, 0, 0))]
+# Sent on every connect (once the serial is known): the stock-blue press flash by default.
+PRESS_DATA = encode_set_light(press_flash_steps(STOCK_PRESS_COLOR), trigger=TRIGGER_BUTTON_DOWN)
 
 
 def feed(client: EchoButtonClient, msg_type: int, data: bytes, at: float) -> None:
@@ -178,6 +183,7 @@ def test_animation_then_restore_base_light():
         ours.setblocking(False)
         client._fd = ours.fileno()
         feed(client, MSG_STATUS, bytes.fromhex("005b03"), 0.0)  # learns the serial
+        await asyncio.sleep(0.01)  # connect-time commands (the press flash) go out
 
         await client.set_base_light((160, 0, 255))
         await client.play_animation([LightStep(20, (0, 255, 0)), LightStep(20, (0, 0, 0))])
@@ -186,11 +192,12 @@ def test_animation_then_restore_base_light():
         button.setblocking(False)
         received = FrameParser().feed(button.recv(4096))
         messages = [parse_message(p) for p in received]
-        assert [m.type for m in messages] == [MSG_SET_LIGHT] * 3
-        assert [m.serial for m in messages] == [SERIAL] * 3
-        assert messages[0].data.hex() == "0101ff01ffffa000ff00"  # steady purple, longest command
-        assert messages[1].data.hex() == "010101020014" + "00ff00" + "00" + "0014" + "000000" + "00"
-        assert messages[2].data == messages[0].data
+        assert [m.type for m in messages] == [MSG_SET_LIGHT] * 4
+        assert [m.serial for m in messages] == [SERIAL] * 4
+        assert messages[0].data == PRESS_DATA  # the serial arrived: press flash first
+        assert messages[1].data.hex() == "0101ff01ffffa000ff00"  # steady purple, longest command
+        assert messages[2].data.hex() == "010101020014" + "00ff00" + "00" + "0014" + "000000" + "00"
+        assert messages[3].data == messages[1].data
         client._cancel_base_timer()
         ours.close()
         button.close()
@@ -205,10 +212,11 @@ def test_refresh_does_not_cut_a_running_animation(monkeypatch):
         client, _ = make_client()
         ours, button = connect(client)
         feed(client, MSG_STATUS, STATUS, 0.0)
+        await asyncio.sleep(0.01)  # connect-time commands (the press flash) go out
         await client.set_base_light(STEADY)  # refresh due in 50 ms
         await client.play_animation(RED)  # runs for 300 ms
         await asyncio.sleep(0.15)
-        assert sent(button) == [STEADY_DATA, encode_set_light(RED)]
+        assert sent(button) == [PRESS_DATA, STEADY_DATA, encode_set_light(RED)]
         client._cancel_base_timer()
         ours.close()
         button.close()
@@ -221,6 +229,7 @@ def test_failed_send_keeps_the_running_animations_restore():
         client, _ = make_client()
         ours, button = connect(client)
         feed(client, MSG_STATUS, STATUS, 0.0)
+        await asyncio.sleep(0.01)  # connect-time commands (the press flash) go out
         await client.set_base_light(STEADY)
         await client.play_animation(GREEN)  # 50 ms
 
@@ -233,7 +242,7 @@ def test_failed_send_keeps_the_running_animations_restore():
         client._send = working_send
 
         await asyncio.sleep(0.15)  # green ended: the steady color is back
-        assert sent(button) == [STEADY_DATA, encode_set_light(GREEN), STEADY_DATA]
+        assert sent(button) == [PRESS_DATA, STEADY_DATA, encode_set_light(GREEN), STEADY_DATA]
         client._cancel_base_timer()
         ours.close()
         button.close()
@@ -254,7 +263,7 @@ def test_overlapping_animations_restore_after_the_last_one():
         await asyncio.gather(first, second)
 
         await asyncio.sleep(0.15)  # green's end must not cut red short
-        assert sent(button) == [encode_set_light(GREEN), encode_set_light(RED)]
+        assert sent(button) == [encode_set_light(GREEN), encode_set_light(RED), PRESS_DATA]
         await asyncio.sleep(0.3)  # red ended
         assert sent(button) == [STEADY_DATA]
         client._cancel_base_timer()
@@ -271,7 +280,7 @@ def test_steady_color_goes_out_once_the_serial_is_known():
         ours, button = connect(client)
         feed(client, MSG_STATUS, STATUS, 0.0)  # first message after the restart brings the serial
         await asyncio.sleep(0.01)
-        assert sent(button) == [STEADY_DATA]
+        assert sent(button) == [PRESS_DATA, STEADY_DATA]
         feed(client, MSG_STATUS, STATUS, 1.0)  # later messages don't resend it
         await asyncio.sleep(0.01)
         assert sent(button) == []
@@ -393,6 +402,8 @@ def test_partial_writes_still_send_whole_frames_in_order(monkeypatch):
         client, _ = make_client()
         ours, button = connect(client)
         feed(client, MSG_STATUS, STATUS, 0.0)
+        await asyncio.sleep(0.01)
+        assert sent(button) == [PRESS_DATA]
         real_write = os.write
         calls = 0
 
@@ -489,7 +500,7 @@ def test_keep_awake_sends_status_requests_only_while_enabled():
         await asyncio.sleep(0.01)
         link.button.send(encode_frame(encode_message(MSG_STATUS, SERIAL, STATUS), 1))  # brings the serial
         await asyncio.sleep(0.1)
-        assert received(link.button) == []  # off by default
+        assert received(link.button) == [(MSG_SET_LIGHT, PRESS_DATA)]  # the press flash; keep-awake is off
 
         client.set_keep_awake(0.02)
         await asyncio.sleep(0.005)
@@ -534,7 +545,7 @@ def test_keep_awake_starts_with_a_request_on_connect():
         link.button.send(encode_frame(encode_message(MSG_STATUS, SERIAL, STATUS), 1))
         await asyncio.sleep(0.05)
         # Connecting doesn't reset the button's sleep timer, so don't wait 240 s for the first one.
-        assert received(link.button) == [(MSG_STATUS_REQUEST, b"")]
+        assert received(link.button) == [(MSG_STATUS_REQUEST, b""), (MSG_SET_LIGHT, PRESS_DATA)]
         with pytest.raises(ValueError):
             client.set_keep_awake(0)
         task.cancel()
@@ -543,3 +554,31 @@ def test_keep_awake_starts_with_a_request_on_connect():
         link.button.close()
 
     asyncio.run(scenario())
+
+
+def test_press_flash_goes_out_on_connect_and_when_changed():
+    async def scenario():
+        client, _ = make_client()
+        client.set_press_color((255, 255, 255))  # from the options, before the button connected
+        ours, button = connect(client)
+        feed(client, MSG_STATUS, STATUS, 0.0)
+        await asyncio.sleep(0.01)
+        white = encode_set_light(press_flash_steps((255, 255, 255)), trigger=TRIGGER_BUTTON_DOWN)
+        assert sent(button) == [white]
+        # the stock shape: 100 ms color, 100 ms off, then the button-down trigger trailer
+        assert white.hex() == "01010102" + "0064ffffff00" + "006400000000" + "020000"
+
+        client.set_press_color((0, 0, 0))  # changed while connected: goes out now
+        await asyncio.sleep(0.01)
+        assert sent(button) == [bytes.fromhex("01010101" "000100000000" "020000")]
+        assert client.press_color == (0, 0, 0)
+        ours.close()
+        button.close()
+
+    asyncio.run(scenario())
+
+
+def test_press_flash_is_stored_while_disconnected():
+    client, _ = make_client()
+    client.set_press_color((1, 2, 3))  # no connection: nothing to send, no error
+    assert client.press_color == (1, 2, 3)

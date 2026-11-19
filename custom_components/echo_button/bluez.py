@@ -119,6 +119,38 @@ def adapter_address(objects: dict, dev_path: str) -> str:
     return str(unwrap(adapter["Address"]))
 
 
+def classic_records(objects: dict, address: str) -> list[tuple[str, str]]:
+    """(adapter path, device path) of BlueZ records for `address` left by Classic Bluetooth.
+
+    A button that ran the stock firmware was paired over Classic. After it switches to
+    AButton (BLE only), such a record makes BlueZ try a Classic connection, which fails with
+    br-connection-create-socket. A record created from BLE adverts has no Class and isn't
+    paired, so it is left alone.
+    """
+    address = address.upper()
+    found = []
+    for path, ifaces in objects.items():
+        dev = ifaces.get(DEVICE)
+        if dev is None or str(unwrap(dev.get("Address", ""))).upper() != address:
+            continue
+        if unwrap(dev.get("Paired", False)) or unwrap(dev.get("Bonded", False)) or "Class" in dev:
+            found.append((path.rsplit("/", 1)[0], path))
+    return sorted(found)
+
+
+async def forget_classic_pairing(address: str) -> int:
+    """Remove the Classic records BlueZ keeps for `address` (see classic_records). Returns how many."""
+    bz = await Bluez.connect()
+    try:
+        records = classic_records(await bz.objects(), address)
+        for adapter, path in records:
+            _LOGGER.info("Removing the stock firmware's Classic pairing for %s (%s)", address, path)
+            await bz.call(adapter, ADAPTER, "RemoveDevice", "o", [path])
+        return len(records)
+    finally:
+        bz.disconnect()
+
+
 class Bluez:
     def __init__(self, bus: MessageBus) -> None:
         self.bus = bus

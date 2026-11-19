@@ -71,10 +71,11 @@ after you reset it), the integration removes the old pairing and pairs again.
 
 On the integration card, select **Configure** to set:
 
+- **Press flash color** (default blue, as the button ships): the button's own short
+  flash the moment it's pressed. Pick any color, or black to turn it off. Home Assistant
+  stores it on the button each time it connects.
 - **Press feedback:** the on/off colors and the feedback duration (default 2000 ms;
-  set 0 to turn feedback off). The button always plays its own short **blue flash** on
-  every press. That's built into its firmware and can't be changed (yet); the feedback
-  color appears right after it.
+  set 0 to turn feedback off). The feedback color appears right after the press flash.
 - **Keep awake** (off by default): the button goes to sleep after 10 idle minutes. The
   next press only wakes it and isn't reported; the button reconnects about 2 seconds
   later. With this on, Home Assistant asks the button for its status when it connects
@@ -161,8 +162,8 @@ Flash red three times when the doorbell rings:
 
 When the animation ends, the LED goes back to the LED entity's color (or off). A
 `fade` that starts right after a physical press can render wrong, because the button's
-own press flash interferes. Press feedback avoids that by building its fade from short
-fixed-color steps.
+own press flash interferes (set the press flash color to black to avoid that). Press
+feedback avoids it by building its fade from short fixed-color steps.
 
 ## Troubleshooting
 
@@ -244,10 +245,26 @@ notes on what was tried.
   (75 falls to about 52 at full red and to 0 at full white, while the button keeps
   working), so only readings taken after the LED has been dark for 10 seconds are used.
   With the LED entity on all the time, the level doesn't update.
-- **The built-in blue press flash** can't be disabled or recolored (yet).
+- **The press flash color** is stored on the button each time it connects. It survives
+  reconnects; whether it survives the button's sleep isn't tested yet. If it doesn't, the
+  press that wakes a sleeping button flashes the default blue.
 - **Multiple buttons** share one Bluetooth link and should work, but only one button
   has been tested.
 - Without **Keep awake**, the press that wakes a sleeping button (10 idle minutes) is lost.
+
+## Open firmware (experimental)
+
+[`firmware/`](firmware/README.md) has **AButton**, replacement firmware built from source for
+the button's chip: it never sleeps, reports presses (single, double, triple, long) and battery
+as BTHome over BLE, so ESPHome Bluetooth proxies relay them to Home Assistant, and updates
+over the air with signed images. This integration (0.2.0+) discovers AButtons too and gives
+them the same LED light entity and `play_animation` action, an Identify button, and the
+button's settings. It needs a one-time wired flash:
+four wires soldered to the test pads in the battery compartment and a 3.3 V USB-serial
+adapter. **[`firmware/GUIDE.md`](firmware/GUIDE.md)** is the step-by-step procedure, and
+[`firmware/prebuilt/`](firmware/prebuilt/) has ready-made images. A button running them takes
+OTA updates signed with the maintainer's key only; build from source to use your own key. It runs on two test units; see [`research/STATUS.md`](research/STATUS.md) for open
+items.
 
 ## Development
 
@@ -262,6 +279,8 @@ ruff check .
 run the same code without Home Assistant.
 
 ## Disclaimer
+
+**No warranty.** Opening, wiring and reflashing a button is entirely at your own risk. The maintainer is not responsible for bricked, broken or unflashable buttons, or any other damage, however it happens. The software is provided "as is" (see the license).
 
 Amazon, Alexa and Echo are trademarks of Amazon.com, Inc. or its affiliates. This
 project is not affiliated with, endorsed by, or supported by Amazon.
