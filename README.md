@@ -14,6 +14,22 @@ through the cloud.
 
 https://github.com/user-attachments/assets/a3f55fe2-0d2b-4031-b9c9-473aa6e054a4
 
+## Open firmware
+
+Custom firmware is not required to use the button with Home Assistant.
+
+[`firmware/`](firmware/README.md) has **AButton**, replacement firmware built from source for
+the button's chip: it never sleeps, reports presses (single, double, triple, long) and battery
+as BTHome over BLE, so ESPHome Bluetooth proxies relay them to Home Assistant, and updates
+over the air with signed images. This integration (0.2.0+) discovers AButtons too and gives
+them the same LED light entity and `play_animation` action, an Identify button, and the
+button's settings. It needs a one-time wired flash:
+four wires soldered to the test pads in the battery compartment and a 3.3 V USB-serial
+adapter. **[`firmware/GUIDE.md`](firmware/GUIDE.md)** is the step-by-step procedure, and
+[`firmware/prebuilt/`](firmware/prebuilt/) has ready-made images. A button running them takes
+OTA updates signed with the maintainer's key only; build from source to use your own key. It runs on two test units; see [`research/STATUS.md`](research/STATUS.md) for open
+items.
+
 ## Features
 
 For each button you get:
@@ -155,6 +171,9 @@ Flash red three times when the doorbell rings:
 
 ### `echo_button.play_animation`
 
+Ready-made animations (Aurora, Rainbow, Breathe, Police, Doorbell) as Home Assistant scripts:
+[`examples/animations.yaml`](examples/animations.yaml).
+
 | Field | Description |
 |---|---|
 | `steps` | 1–41 steps. Each has a `color` (`[r, g, b]` or `"#rrggbb"`), a `duration` in milliseconds (1–65535), and an optional `fade: true` that fades into this step's color. |
@@ -251,20 +270,6 @@ notes on what was tried.
 - **Multiple buttons** share one Bluetooth link and should work, but only one button
   has been tested.
 - Without **Keep awake**, the press that wakes a sleeping button (10 idle minutes) is lost.
-
-## Open firmware (experimental)
-
-[`firmware/`](firmware/README.md) has **AButton**, replacement firmware built from source for
-the button's chip: it never sleeps, reports presses (single, double, triple, long) and battery
-as BTHome over BLE, so ESPHome Bluetooth proxies relay them to Home Assistant, and updates
-over the air with signed images. This integration (0.2.0+) discovers AButtons too and gives
-them the same LED light entity and `play_animation` action, an Identify button, and the
-button's settings. It needs a one-time wired flash:
-four wires soldered to the test pads in the battery compartment and a 3.3 V USB-serial
-adapter. **[`firmware/GUIDE.md`](firmware/GUIDE.md)** is the step-by-step procedure, and
-[`firmware/prebuilt/`](firmware/prebuilt/) has ready-made images. A button running them takes
-OTA updates signed with the maintainer's key only; build from source to use your own key. It runs on two test units; see [`research/STATUS.md`](research/STATUS.md) for open
-items.
 
 ## Development
 

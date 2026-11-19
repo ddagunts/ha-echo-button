@@ -246,6 +246,10 @@ automation:
             target: { entity_id: light.echobtnabc_led }
 ```
 
+Ready-made animations to start from (Aurora, Rainbow, Breathe, Police, Doorbell):
+[`../examples/animations.yaml`](../examples/animations.yaml), Home Assistant scripts that ask
+which button to play on.
+
 Without Home Assistant, `firmware/abutton_ble.py` does the same from a shell (`color`,
 `animate`, `config`, `name`, `identify`; see [`README.md`](README.md#configure-a-button-from-the-command-line)).
 

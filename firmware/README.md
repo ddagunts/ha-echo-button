@@ -63,6 +63,9 @@ python3 firmware/abutton_ble.py info     $B                    # firmware, name,
 python3 firmware/abutton_ble.py color    $B ff8800             # steady color ("off" turns it off)
 python3 firmware/abutton_ble.py animate  $B ff0000:300 000000:300 --repeat 0   # blink until stopped
 python3 firmware/abutton_ble.py animate  $B ff0000:500 0000ff:500:fade --repeat 3
+# Aurora (examples/animations.yaml has it and more as Home Assistant scripts):
+python3 firmware/abutton_ble.py animate  $B 00c8a0:1800:fade 28ff5a:1600:fade 007a8c:1400:fade \
+    1aff9c:900:fade 8228ff:2000:fade 1e3cff:1500:fade c828c8:1200:fade 00283a:1600:fade 00c8a0:1400:fade --repeat 0
 python3 firmware/abutton_ble.py stop     $B
 python3 firmware/abutton_ble.py config   $B --brightness 128 --press-color 00ff00 --long-press-ms 800
 python3 firmware/abutton_ble.py config   $B --advert-interval-ms 1000 --low-battery-pct 25 --boot-battery off

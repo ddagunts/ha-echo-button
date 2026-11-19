@@ -1,0 +1,117 @@
+# Example LED animations for Echo Buttons, as Home Assistant scripts.
+#
+# Use: put this file in config/packages/ with
+#     homeassistant:
+#       packages: !include_dir_named packages
+# in configuration.yaml (or paste the scripts, without the top "script:" line, into
+# scripts.yaml), then restart. Each script asks which button's LED to use:
+#     action: script.abutton_aurora
+#     data: { led: light.echobtnabc_led }
+#
+# Works with AButton firmware (up to 40 steps; repeat 0 loops until the light is turned on
+# or off) and, with a finite repeat, with stock buttons too (up to 41 steps).
+# Steps: color ([r, g, b] or "#rrggbb"), duration in ms, optional fade: true (fades from the
+# previous color into this one).
+
+script:
+  abutton_aurora:
+    alias: "Echo Button: Aurora"
+    description: Slow northern-lights fades through teal, green, violet and blue, until changed.
+    icon: mdi:aurora
+    fields: &led_field
+      led:
+        name: LED
+        description: The Echo Button LED to play it on.
+        required: true
+        selector:
+          entity:
+            filter:
+              integration: echo_button
+              domain: light
+    sequence:
+      - action: echo_button.play_animation
+        target: { entity_id: "{{ led }}" }
+        data:
+          repeat: 0
+          steps:
+            - { color: "#00c8a0", duration: 1800, fade: true }   # teal
+            - { color: "#28ff5a", duration: 1600, fade: true }   # aurora green
+            - { color: "#007a8c", duration: 1400, fade: true }   # deep teal
+            - { color: "#1aff9c", duration: 900, fade: true }    # flicker of mint
+            - { color: "#8228ff", duration: 2000, fade: true }   # violet curtain
+            - { color: "#1e3cff", duration: 1500, fade: true }   # blue
+            - { color: "#c828c8", duration: 1200, fade: true }   # magenta edge
+            - { color: "#00283a", duration: 1600, fade: true }   # night sky
+            - { color: "#00c8a0", duration: 1400, fade: true }   # back to teal
+
+  abutton_rainbow:
+    alias: "Echo Button: Rainbow"
+    description: A smooth loop around the color wheel, until changed.
+    icon: mdi:looks
+    fields: *led_field
+    sequence:
+      - action: echo_button.play_animation
+        target: { entity_id: "{{ led }}" }
+        data:
+          repeat: 0
+          steps:
+            - { color: [255, 0, 0], duration: 700, fade: true }
+            - { color: [255, 160, 0], duration: 700, fade: true }
+            - { color: [0, 255, 0], duration: 700, fade: true }
+            - { color: [0, 255, 255], duration: 700, fade: true }
+            - { color: [0, 0, 255], duration: 700, fade: true }
+            - { color: [255, 0, 255], duration: 700, fade: true }
+
+  abutton_breathe:
+    alias: "Echo Button: Breathe"
+    description: A calm cyan pulse, until changed.
+    icon: mdi:weather-windy
+    fields: *led_field
+    sequence:
+      - action: echo_button.play_animation
+        target: { entity_id: "{{ led }}" }
+        data:
+          repeat: 0
+          steps:
+            - { color: [0, 180, 255], duration: 1600, fade: true }
+            - { color: [0, 180, 255], duration: 300 }
+            - { color: [0, 12, 20], duration: 1800, fade: true }
+            - { color: [0, 12, 20], duration: 500 }
+
+  abutton_police:
+    alias: "Echo Button: Police"
+    description: Red and blue double strobes, 6 times.
+    icon: mdi:car-emergency
+    fields: *led_field
+    sequence:
+      - action: echo_button.play_animation
+        target: { entity_id: "{{ led }}" }
+        data:
+          repeat: 6
+          steps:
+            - { color: [255, 0, 0], duration: 70 }
+            - { color: [0, 0, 0], duration: 50 }
+            - { color: [255, 0, 0], duration: 70 }
+            - { color: [0, 0, 0], duration: 160 }
+            - { color: [0, 0, 255], duration: 70 }
+            - { color: [0, 0, 0], duration: 50 }
+            - { color: [0, 0, 255], duration: 70 }
+            - { color: [0, 0, 0], duration: 160 }
+
+  abutton_doorbell:
+    alias: "Echo Button: Doorbell"
+    description: Two white flashes, then a warm amber afterglow that fades out.
+    icon: mdi:doorbell
+    fields: *led_field
+    sequence:
+      - action: echo_button.play_animation
+        target: { entity_id: "{{ led }}" }
+        data:
+          repeat: 1
+          steps:
+            - { color: [255, 255, 255], duration: 120 }
+            - { color: [0, 0, 0], duration: 90 }
+            - { color: [255, 255, 255], duration: 120 }
+            - { color: [255, 120, 0], duration: 600, fade: true }
+            - { color: [255, 120, 0], duration: 1500 }
+            - { color: [0, 0, 0], duration: 2500, fade: true }
