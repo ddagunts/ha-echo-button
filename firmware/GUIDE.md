@@ -253,6 +253,10 @@ which button to play on.
 Without Home Assistant, `firmware/abutton_ble.py` does the same from a shell (`color`,
 `animate`, `config`, `name`, `identify`; see [`README.md`](README.md#configure-a-button-from-the-command-line)).
 
+No command line? The **web page** in [`../web/`](../web/) does the same from Chrome or Edge
+over Web Bluetooth. Serve it over HTTPS (the repository's GitHub Pages) or locally with
+`python3 -m http.server -d web` and open `http://localhost:8000`.
+
 A unit that was paired with the stock firmware's Classic Bluetooth integration can be removed
 from it; AButton doesn't use Classic Bluetooth.
 
@@ -262,7 +266,8 @@ BTHome adverts are plain by default: anyone nearby can see the presses, and coul
 ones to trigger your automations. To encrypt them:
 
 1. **Press the button once.** It only accepts a key change within 60 seconds of a press.
-2. Run `python3 firmware/abutton_ble.py key AA:BB:CC:DD:EE:FF --generate`. The button blinks green
+2. On the web page, click **Turn on encryption**, or run
+   `python3 firmware/abutton_ble.py key AA:BB:CC:DD:EE:FF --generate`. The button blinks green
    twice, and you get the key (32 hex characters). Save it; the button never shows it again.
 3. In Home Assistant, the BTHome integration asks for the key within a minute
    (Settings → Devices & services). Paste it there.
@@ -346,7 +351,7 @@ Flash your own dump (`dump/sflash.bin`, step 3) with `--sectors 0x1000,0x4000-0x
 
 Without a dump: a stock firmware image of a rev-1 unit (the firmware sectors only, no unit
 data) is available from the maintainer on request; it isn't published here, as it's
-Amazon's. A unit on AButton 0.2.0 needs an OTA update to 0.2.1 first to get flash mode.
+Amazon's.
 
 After restoring stock, pair it with the Home Assistant integration as in the main README.
 
@@ -359,11 +364,9 @@ After restoring stock, pair it with the Home Assistant integration as in the mai
 | Every command gets `0x0C` | stock is busy (power-cycle, press, retry) or AButton is running (use OTA) |
 | Flash reads `0x12` | the ROM handler before flash detection; the flasher handles it (a no-op write first) |
 | Unit dies 2 s after each press | the firmware doesn't start or doesn't latch P5: recovery (step 7) |
-| BTHome shows battery 0 % | an old build (before 0.1.5) |
 | Battery % doesn't change | it's only measured while the LED is dark; a constantly lit LED freezes it |
-| No "Amazon Echo Button" discovery for an AButton | the proxy must be in active mode (scan responses), firmware 0.2.0+ |
+| No "Amazon Echo Button" discovery for an AButton | the proxy must be in active mode (scan responses) |
 | `br-connection-create-socket` (CLI or Home Assistant) | BlueZ still has the stock firmware's Classic pairing for the button. The integration (0.2.1+) removes it by itself; on the command line, `bluetoothctl remove <MAC>` |
-| LED stays white after boot | an old build (0.1.2); update |
 
 ## Building your own
 

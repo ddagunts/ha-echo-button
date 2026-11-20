@@ -198,7 +198,7 @@
   <section id="intro" class="card">
     <h2>Before you start</h2>
     <ol>
-      <li>The button runs <strong>AButton</strong> 0.2.0 or newer (0.3.0+ for encryption).</li>
+      <li>The button runs <strong>AButton</strong> firmware (0.3.0 or newer for encryption).</li>
       <li>It's switched on: press it once to wake it up.</li>
       <li>Nothing else is connected to it. The button takes one connection at a time, so Home Assistant
         can't change its light while this page is connected.</li>
@@ -443,7 +443,7 @@ async function open() {
     svc = await server.getPrimaryService(A.SERVICE);
   } catch {
     device.gatt.disconnect();
-    throw new Error("no AButton service: stock firmware, or AButton older than 0.2.0");
+    throw new Error("no AButton service: stock firmware, or not an AButton");
   }
   ch = {};
   for (const [k, u] of [["led", A.LED], ["config", A.CONFIG], ["name", A.NAME], ["command", A.COMMAND]]) {

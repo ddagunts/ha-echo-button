@@ -79,7 +79,7 @@
 #include "bthome.h"
 
 #ifndef ABTN_FW_VERSION
-#define ABTN_FW_VERSION         "0.1.0"
+#define ABTN_FW_VERSION         "dev"
 #endif
 
 /* ---- board ---------------------------------------------------------------------- */
@@ -619,7 +619,7 @@ static void battery_read(void)
     DBG("battery: P0 %d mV with P13 low\n", (int)wiced_hal_adc_read_voltage(BATT_ADC));
 #endif
     /* P13 switches the battery divider onto ADC P0, as stock's 0x21c994 does it: P13 high,
-     * read, P13 low. With P13 low (how AButton used to read it) P0 reads under 0.9 V. */
+     * read, P13 low. With P13 low, P0 reads under 0.9 V. */
     wiced_hal_gpio_set_pin_output(AUX_OUT_PIN, GPIO_PIN_OUTPUT_HIGH);
     mv = (int32_t)wiced_hal_adc_read_voltage(BATT_ADC);
     wiced_hal_gpio_set_pin_output(AUX_OUT_PIN, GPIO_PIN_OUTPUT_LOW);
@@ -1212,11 +1212,10 @@ static wiced_bt_gatt_status_t gatt_callback(wiced_bt_gatt_evt_t event, wiced_bt_
 }
 
 /* ---- sleep ---------------------------------------------------------------------- */
-/* Sleep is never allowed: AButton's "off" is the P5 power latch, like stock's. Without
- * wiced_sleep_configure (0.1.3-0.1.5) the release build, which has no transport to keep it
- * awake, died within minutes on a test unit (2026-11-19), so the permit handler is back. No
- * wake source: the button is polled, and the device-wake GPIO isn't needed when sleep never
- * happens (0.1.2 gave it P6, a suspect for the dead button interrupt). */
+/* Sleep is never allowed: AButton's "off" is the P5 power latch, like stock's. The permit
+ * handler is needed: without wiced_sleep_configure, a release build (no transport to keep it
+ * awake) goes to sleep and dies within minutes. No wake source: the button is polled, and the
+ * device-wake GPIO isn't needed when sleep never happens. */
 static uint32_t sleep_permit(wiced_sleep_poll_type_t type)
 {
     return type == WICED_SLEEP_POLL_TIME_TO_SLEEP ? 0 : WICED_SLEEP_NOT_ALLOWED;

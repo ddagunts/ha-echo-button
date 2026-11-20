@@ -34,3 +34,21 @@ def test_example_is_a_valid_animation(name, data):
     assert all(len(w) <= A.DEFAULT_WRITE_SIZE for w in writes)
     assert len(steps) <= STOCK_MAX_STEPS
 
+
+def test_web_page_presets_match_the_examples():
+    """web/index.html carries the same animations as presets (regenerate it if this fails)."""
+    import json
+    import re
+
+    html = (EXAMPLES.parent.parent / "web" / "index.html").read_text()
+    presets = json.loads(re.search(r'<script type="application/json" id="presets">(.*?)</script>', html, re.S)[1])
+    scripts = yaml.safe_load(EXAMPLES.read_text())["script"]
+    expected = []
+    for script in scripts.values():
+        data = script["sequence"][0]["data"]
+        expected.append({
+            "name": script["alias"].split(": ", 1)[1], "repeat": data.get("repeat", 1),
+            "steps": [{"ms": s["duration"], "color": list(_color(s["color"])), "fade": bool(s.get("fade"))}
+                      for s in data["steps"]],
+        })
+    assert presets == expected

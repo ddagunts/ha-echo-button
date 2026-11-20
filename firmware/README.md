@@ -7,9 +7,9 @@ with no Echo, Alexa or pairing.
 
 > **Status (November 2026):** runs on two rev-1 buttons. It boots, holds its own power,
 > reports single / double / triple / long presses and battery over BTHome, takes LED colors,
-> animations and settings over BLE (0.2.0+), and updates over the air (signed OTA). Ready-made images are in [`prebuilt/`](prebuilt/); the step-by-step
-> wiring, flashing and setup procedure is **[`GUIDE.md`](GUIDE.md)**. Open items (release-build
-> stability, going back to stock from AButton) are in
+> animations and settings over BLE, and updates over the air (signed OTA). Ready-made images are in [`prebuilt/`](prebuilt/); the step-by-step
+> wiring, flashing and setup procedure is **[`GUIDE.md`](GUIDE.md)**. Open items (the UART flash mode,
+> going back to stock from AButton) are in
 > [`../research/STATUS.md`](../research/STATUS.md#open). Keep your button's original flash dump.
 
 > **Prebuilt images only take updates signed with the maintainer's key.** The images in
@@ -34,7 +34,7 @@ with no Echo, Alexa or pairing.
   authenticated (AES-128-CCM, the BTHome bind key), so nobody nearby can read the presses or
   fake them. Home Assistant's BTHome integration asks for the key. Setting or changing the key
   only works within 60 s of a press on the button. The key is never readable over BLE.
-- **LED control over BLE** (0.2.0): a steady color and animations (up to 40 steps with
+- **LED control over BLE:** a steady color and animations (up to 40 steps with
   fades, repeated or looping), from Home Assistant (this repo's integration: a `light`
   entity and `echo_button.play_animation`) or `abutton_ble.py`. The steady color survives
   restarts.
@@ -54,6 +54,8 @@ with no Echo, Alexa or pairing.
 - **One image for every unit:** the MAC stays in the unit's flash sector 0 and the name and
   settings in its NVRAM, so OTA never changes a unit's identity.
 - Device Information service: manufacturer, model, firmware version.
+- **Web page** ([`../web/`](../web/)): light, settings, name, encryption key and commands from
+  Chrome or Edge over Web Bluetooth, with nothing to install.
 
 The GATT protocol (service `0e5a1000-a8b9-4c3b-9d1a-ab7ff0ab7700`) is documented at the top
 of [`abutton/abutton.c`](abutton/abutton.c) and in
@@ -135,7 +137,7 @@ Needs Linux x86-64, Python 3 with `cryptography` (and `bleak` for the BLE tool).
    ```sh
    firmware/build.sh                  # release
    TRACE=1 firmware/build.sh          # with WICED traces on the HCI UART, 115200 baud
-   ABTN_FW_VERSION=0.2.0 firmware/build.sh
+   ABTN_FW_VERSION=0.3.0 firmware/build.sh
    ```
 
    The first build creates your **OTA signing key** at `~/.config/abutton/ota_key.pem`
@@ -234,5 +236,6 @@ verifier's algorithm rebuilt with 32-bit words.
 | `ota_sign.py` | key generation, the firmware's public-key source, signing, verification |
 | `abutton_image.py` | assemble full flash images, set name/MAC, show identity |
 | `abutton_ble.py` | BTHome monitor (decrypts with `--key`), info, LED, animations, settings, name, commands, encryption key, OTA client |
+| `../web/` | the Web Bluetooth setup page (`index.html`, protocol in `abutton.js`) |
 | `GUIDE.md` | wiring, flashing, setup, OTA and recovery, step by step |
 | `prebuilt/` | ready-made AButton images (release and debug, flash and OTA) and the stock firmware |

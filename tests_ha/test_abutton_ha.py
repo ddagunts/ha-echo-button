@@ -123,14 +123,14 @@ async def test_connect_retries_after_removing_a_stale_classic_pairing(hass: Home
     client = entry.runtime_data.client
     good = MagicMock()
     good.services.get_service.return_value = object()
-    good.read_gatt_char = AsyncMock(return_value=b"0.2.0")
+    good.read_gatt_char = AsyncMock(return_value=b"0.3.0")
     stale = BleakError("Failed to connect after 3 attempt(s): [org.bluez.Error.Failed] br-connection-create-socket")
     forget_classic.return_value = 1
     with patch.object(client, "_establish", AsyncMock(side_effect=[stale, good])) as establish, \
             patch("custom_components.echo_button.abutton_client.asyncio.sleep", AsyncMock()):
         assert await client._connect() is good
     assert establish.await_count == 2
-    assert client.firmware == "0.2.0"
+    assert client.firmware == "0.3.0"
 
 
 async def test_other_connect_errors_are_not_retried(hass: HomeAssistant, forget_classic) -> None:

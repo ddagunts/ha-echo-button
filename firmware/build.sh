@@ -3,7 +3,7 @@
 #
 #   firmware/build.sh                 # release build
 #   TRACE=1 firmware/build.sh         # with WICED traces on the HCI UART (bring-up)
-#   ABTN_FW_VERSION=0.2.0 firmware/build.sh
+#   ABTN_FW_VERSION=0.3.0 firmware/build.sh
 #
 # Needs: the SDK (research/install_wiced_b0_sdk.sh), Python 3 with `cryptography`.
 # The OTA signing key is created on first use at ~/.config/abutton/ota_key.pem
@@ -19,7 +19,7 @@ REPO=$(cd "$(dirname "$0")/.." && pwd)
 SDK=${ABTN_SDK:-$HOME/Documents/WICED-Studio-6.0/20735-B0_Bluetooth}
 OUT=$REPO/firmware/out
 TRACE=${TRACE:-0}
-VERSION=${ABTN_FW_VERSION:-0.1.0}
+VERSION=${ABTN_FW_VERSION:-dev}
 if [ -z "${PYTHON:-}" ]; then
     if [ -x "$REPO/.venv/bin/python" ]; then PYTHON=$REPO/.venv/bin/python; else PYTHON=python3; fi
 fi

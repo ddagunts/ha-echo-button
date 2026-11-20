@@ -23,7 +23,8 @@ the button's chip: it never sleeps, reports presses (single, double, triple, lon
 as BTHome over BLE, so ESPHome Bluetooth proxies relay them to Home Assistant, and updates
 over the air with signed images. This integration (0.2.0+) discovers AButtons too and gives
 them the same LED light entity and `play_animation` action, an Identify button, and the
-button's settings. Its presses can be encrypted (0.3.0). It needs a one-time wired flash:
+button's settings. Its presses can be encrypted (0.3.0), and a [web page](web/) sets a button
+up from Chrome or Edge over Web Bluetooth. It needs a one-time wired flash:
 four wires soldered to the test pads in the battery compartment and a 3.3 V USB-serial
 adapter. **[`firmware/GUIDE.md`](firmware/GUIDE.md)** is the step-by-step procedure, and
 [`firmware/prebuilt/`](firmware/prebuilt/) has ready-made images. A button running them takes

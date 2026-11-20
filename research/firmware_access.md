@@ -167,8 +167,7 @@ DS+12, counted from DS+16), then records `<id u16 LE> <len LEB128> <data>`. The 
 `0x0303` `"BCM20735B0 fcbga\0"`; code and data are `0x0103` Data records
 (`<RAM addr u32> <bytes>`); `0x0110` patch entries; `0x0106` function calls. **The section
 ends with the end record `fe 00 00`** (id `0x00FE`, length 0), which the header length
-includes. Without it the ROM runs off the end of the DS and never starts the app (this is
-what bricked both test units). **No integrity check:** a stock DS with 4 bytes changed
+includes. Without it the ROM runs off the end of the DS and never starts the app. **No integrity check:** a stock DS with 4 bytes changed
 (`fw_mod.py --press-color`) boots (verified).
 
 Memory map: ROM `0x00000000`–`0x001FFFFF` (reset SP `0x00200400`, PC `0x000003F5`); RAM

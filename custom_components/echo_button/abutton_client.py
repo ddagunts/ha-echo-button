@@ -87,7 +87,7 @@ class AButtonClient:
             client = await self._establish()
         if client.services.get_service(A.SERVICE_UUID) is None:
             await client.disconnect()
-            raise AButtonUnavailableError(f"{self.address} has no AButton service (firmware older than 0.2.0?)")
+            raise AButtonUnavailableError(f"{self.address} has no AButton service (stock firmware?)")
         self._client = client
         self.connected = True
         self._config_sent = False

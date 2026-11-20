@@ -150,7 +150,7 @@ async def connect(address: str, tries: int = 3) -> BleakClient:
 
 def need_abutton(c: BleakClient) -> None:
     if not c.services.get_service(A.SERVICE_UUID):
-        raise RuntimeError("no AButton service: firmware older than 0.2.0, or not an AButton")
+        raise RuntimeError("no AButton service: stock firmware, or not an AButton")
 
 
 async def info(address: str) -> None:
@@ -160,7 +160,7 @@ async def info(address: str) -> None:
             print(f"{k:13s} {(await c.read_gatt_char(uuid)).decode(errors='replace')}")
         print(f"{'ota service':13s} {'secure' if c.services.get_service(OTA_SEC_SERVICE) else 'MISSING'}")
         if not c.services.get_service(A.SERVICE_UUID):
-            print(f"{'abutton':13s} no settings service (firmware older than 0.2.0)")
+            print(f"{'abutton':13s} no AButton service (stock firmware?)")
             return
         print(f"{'name':13s} {(await c.read_gatt_char(A.NAME_UUID)).decode(errors='replace')}")
         led = A.LedState.decode(bytes(await c.read_gatt_char(A.LED_UUID)))

@@ -9,7 +9,7 @@ serials and pairing keys) stays the unit's own. Checksums: `SHA256SUMS`.
 |---|---|---|
 | `abutton-0.3.0.bin` | AButton 0.3.0, release (no UART traces) | running on two rev-1 units (installed over the air); BTHome encryption verified with Home Assistant; flash mode experimental |
 | `abutton-0.3.0.ota.signed` | the same, as a signed OTA update | installed with it |
-| `abutton-0.3.0-dbg.bin` | AButton 0.3.0 with UART traces (`research/echobtn_trace.py`) | built from the same source; not run on hardware (0.2.0-dbg was) |
+| `abutton-0.3.0-dbg.bin` | AButton 0.3.0 with UART traces (`research/echobtn_trace.py`) | built from the same source; not run on hardware |
 | `abutton-0.3.0-dbg.ota.signed` | the same, as a signed OTA update | |
 
 - **AButton images** are generic: no unit identity. The SDK placeholder MAC in their sector 0
