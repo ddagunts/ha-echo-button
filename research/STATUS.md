@@ -26,17 +26,14 @@ Where the firmware work stands (November 2026). The how-to is
 | BTHome encryption: AES-128-CCM adverts, key set over GATT after a press | verified on a rev-1 unit (2026-11-19): key taken after a press, refused 60 s later; adverts decrypt with the scanned address; counter 256 after a reboot; key kept. Encoder host-tested against bthome-ble. Home Assistant's BTHome integration took the key and decodes the presses |
 | Web Bluetooth setup page (`web/`, GitHub Pages) | verified: encryption turned on for a second unit from the published page |
 | Transmit power setting (Power characteristic) | verified (2026-11-19): received at 1 ft −34 dBm at the default, −45.5 at 0 dBm, −66 at −16; kept across a restart and applied at boot |
-| Light sleep option | verified on a rev-1 unit (2026-11-19): adverts at the same rate as a unit without it (25-minute side-by-side soak, no restart), connections work, presses reach Home Assistant. The power it saves is **not measured** |
-| Home Assistant options for transmit power and sleep (integration 0.3.0) | `tests_ha/` only; not yet on a live Home Assistant |
+| Light sleep option | verified on a rev-1 unit (2026-11-19): adverts at the same rate as a unit without it (25-minute side-by-side soak, no restart), connections work, presses reach Home Assistant. The power it saves isn't measured |
+| Home Assistant options for transmit power and sleep (integration 0.3.0) | verified on a live Home Assistant (2026-11-19), plus `tests_ha/` |
 
 Current build: **0.4.0** (`firmware/prebuilt/`): the release build runs on both test units
 (installed over the air).
 
 ## Open
 
-- **Battery saving isn't measured.** The current drawn with light sleep on and off (a meter
-  in series with the cells) would show what it saves.
-- **Integration 0.3.0** (transmit power and sleep options) hasn't run on a live Home Assistant.
 - **Battery %** is only measured while the LED is dark (the LED's load sags it), so a
   constantly lit LED freezes the value. Fresh cells read 77–100 %; discharge not yet checked.
 - **UART flash mode:** hold the button 8 s at power-up (magenta LED); the firmware
