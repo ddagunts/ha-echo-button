@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AButton Setup</title>
+<meta name="description" content="Set up an Echo Button running AButton firmware from the browser: light, settings, name and BTHome encryption, over Web Bluetooth.">
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --text: #1b1f24;
+    --muted: #5d6673;
+    --line: #dde1e6;
+    --accent: #0b7a75;
+    --accent-text: #ffffff;
+    --accent-soft: #e3f3f2;
+    --danger: #b42318;
+    --danger-soft: #fdecea;
+    --ok: #127a3a;
+    --ok-soft: #e5f5eb;
+    --warn: #9a5b00;
+    --warn-soft: #fff4e0;
+    --input: #ffffff;
+    --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .08);
+    --radius: 14px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #101316;
+      --card: #181c20;
+      --text: #e8eaed;
+      --muted: #9aa3ad;
+      --line: #2b3137;
+      --accent: #3cc3bb;
+      --accent-text: #06201f;
+      --accent-soft: #15302f;
+      --danger: #ff7b6e;
+      --danger-soft: #3a1c19;
+      --ok: #5fd08a;
+      --ok-soft: #16301f;
+      --warn: #f3b552;
+      --warn-soft: #33270f;
+      --input: #101316;
+      --shadow: none;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #101316;
+    --card: #181c20;
+    --text: #e8eaed;
+    --muted: #9aa3ad;
+    --line: #2b3137;
+    --accent: #3cc3bb;
+    --accent-text: #06201f;
+    --accent-soft: #15302f;
+    --danger: #ff7b6e;
+    --danger-soft: #3a1c19;
+    --ok: #5fd08a;
+    --ok-soft: #16301f;
+    --warn: #f3b552;
+    --warn-soft: #33270f;
+    --input: #101316;
+    --shadow: none;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  header { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+  header h1 { font-size: 22px; margin: 0; letter-spacing: -.01em; }
+  header p { margin: 0; color: var(--muted); }
+  header .grow { flex: 1; min-width: 200px; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 18px 18px 16px;
+    margin-bottom: 14px;
+  }
+  .card h2 { font-size: 16px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .card p { margin: 0 0 10px; }
+  .muted { color: var(--muted); }
+  .small { font-size: 13px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .row + .row { margin-top: 10px; }
+  button {
+    font: inherit;
+    border-radius: 10px;
+    border: 1px solid var(--line);
+    background: var(--card);
+    color: var(--text);
+    padding: 8px 14px;
+    cursor: pointer;
+    min-height: 38px;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  button.danger { color: var(--danger); }
+  button.link { border: 0; background: none; color: var(--accent); padding: 0; min-height: 0; text-decoration: underline; }
+  button:disabled { opacity: .5; cursor: default; }
+  input, select, textarea {
+    font: inherit;
+    color: var(--text);
+    background: var(--input);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 7px 10px;
+    min-height: 38px;
+  }
+  textarea { width: 100%; min-height: 64px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+  input[type="color"] { padding: 3px; width: 54px; }
+  input[type="number"] { width: 110px; }
+  input[type="range"] { padding: 0; min-height: 0; accent-color: var(--accent); width: 180px; }
+  input[type="checkbox"] { min-height: 0; width: 17px; height: 17px; accent-color: var(--accent); }
+  label.field { display: grid; gap: 4px; }
+  label.field > span { font-size: 13px; color: var(--muted); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
+  .checks { display: grid; gap: 8px; margin-top: 14px; }
+  .checks label { display: flex; gap: 10px; align-items: flex-start; }
+  .checks input { margin-top: 3px; flex: none; }
+  .device { display: flex; gap: 18px; align-items: center; }
+  .orb {
+    --c: #000000;
+    width: 64px; height: 64px; border-radius: 50%; flex: none;
+    background: radial-gradient(circle at 50% 40%, color-mix(in srgb, var(--c) 85%, white) 0%, var(--c) 55%, color-mix(in srgb, var(--c) 60%, black) 100%);
+    border: 3px solid var(--line);
+    box-shadow: 0 0 22px color-mix(in srgb, var(--c) 55%, transparent);
+    transition: background .25s, box-shadow .25s;
+  }
+  .orb.off { background: radial-gradient(circle at 50% 40%, #3b4046, #1f2327); box-shadow: none; }
+  .orb.animating { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { box-shadow: 0 0 34px color-mix(in srgb, var(--c) 80%, transparent); } }
+  @media (prefers-reduced-motion: reduce) { .orb.animating { animation: none; } }
+  .device h3 { margin: 0; font-size: 18px; word-break: break-word; }
+  .pill {
+    display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+    background: var(--accent-soft); color: var(--accent);
+  }
+  .pill.ok { background: var(--ok-soft); color: var(--ok); }
+  .pill.warn { background: var(--warn-soft); color: var(--warn); }
+  .note { border-radius: 10px; padding: 10px 12px; margin: 10px 0; }
+  .note.warn { background: var(--warn-soft); color: var(--text); }
+  .note.ok { background: var(--ok-soft); color: var(--text); }
+  .note.bad { background: var(--danger-soft); color: var(--text); }
+  .note > :last-child { margin-bottom: 0; }
+  ol { margin: 6px 0 10px; padding-left: 22px; }
+  li { margin: 3px 0; }
+  code, .key {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 13px;
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 1px 5px;
+  }
+  .key { display: block; font-size: 15px; padding: 10px 12px; word-break: break-all; user-select: all; letter-spacing: .03em; }
+  details summary { cursor: pointer; color: var(--accent); margin-top: 6px; }
+  details[open] summary { margin-bottom: 8px; }
+  #status {
+    position: sticky; bottom: 12px; margin-top: 18px; padding: 10px 14px; border-radius: 10px;
+    background: var(--card); border: 1px solid var(--line); box-shadow: var(--shadow); min-height: 42px;
+  }
+  #status.bad { border-color: var(--danger); color: var(--danger); }
+  #status.ok { border-color: var(--ok); }
+  [hidden] { display: none !important; }
+  footer { margin-top: 26px; color: var(--muted); font-size: 13px; }
+  @media (max-width: 520px) {
+    .device { align-items: flex-start; }
+    input[type="range"] { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="grow">
+      <h1>AButton Setup</h1>
+      <p>Set up an Echo Button running AButton firmware, right from your browser.</p>
+    </div>
+    <button id="connect" class="primary">Connect a button</button>
+  </header>
+
+  <div id="unsupported" class="card note bad" hidden>
+    <h2>This browser can't use Bluetooth</h2>
+    <p>Open this page in <strong>Chrome</strong> or <strong>Edge</strong> on Windows, macOS, ChromeOS, Android or
+      Linux. Safari, Firefox and every browser on iPhone and iPad lack Web Bluetooth.</p>
+    <p class="small muted" id="insecure" hidden>The page also has to be opened over <code>https://</code>
+      or from <code>localhost</code>.</p>
+  </div>
+
+  <section id="intro" class="card">
+    <h2>Before you start</h2>
+    <ol>
+      <li>The button runs <strong>AButton</strong> 0.2.0 or newer (0.3.0+ for encryption).</li>
+      <li>It's switched on: press it once to wake it up.</li>
+      <li>Nothing else is connected to it. The button takes one connection at a time, so Home Assistant
+        can't change its light while this page is connected.</li>
+    </ol>
+    <p class="small muted">On Linux, Chrome may need <code>chrome://flags/#enable-web-bluetooth</code> turned on.
+      Not in the list? <button class="link" id="connect-all">Show all Bluetooth devices</button></p>
+  </section>
+
+  <main id="app" hidden>
+    <section class="card">
+      <div class="device">
+        <div class="orb off" id="orb" aria-hidden="true"></div>
+        <div class="grow">
+          <h3 id="dev-name">AButton</h3>
+          <div class="muted small" id="dev-fw"></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button data-cmd="identify">Identify (blink)</button>
+        <button id="disconnect">Disconnect</button>
+      </div>
+    </section>
+
+    <section class="card" id="enc-card">
+      <h2>BTHome encryption <span class="pill" id="enc-pill">…</span></h2>
+      <div id="enc-unsupported" hidden>
+        <p class="muted">This firmware can't encrypt. Update the button to AButton 0.3.0 or newer.</p>
+      </div>
+      <div id="enc-body">
+        <p>With encryption on, nobody nearby can read your presses or fake them. Home Assistant's BTHome
+          integration then needs the button's key.</p>
+        <div class="note warn">
+          <strong>First press the button once.</strong> For safety, the button only accepts a key change
+          within 60 seconds of a press. That press counts like any other, so it may run your automations.
+        </div>
+        <div class="row">
+          <button class="primary" id="key-generate">Turn on encryption</button>
+          <button id="key-off" class="danger" hidden>Turn off encryption</button>
+        </div>
+        <details id="key-own">
+          <summary>Use a key I already have</summary>
+          <div class="row">
+            <input id="key-input" placeholder="32 hex characters" maxlength="32" spellcheck="false"
+                   autocomplete="off" style="flex:1; min-width:240px; font-family:ui-monospace,monospace">
+            <button id="key-use">Use this key</button>
+          </div>
+        </details>
+        <div id="key-result" class="note ok" hidden>
+          <p><strong>Encryption is on.</strong> The button's key:</p>
+          <code class="key" id="key-value"></code>
+          <div class="row" style="margin:10px 0">
+            <button id="key-copy">Copy key</button>
+            <span class="small muted">Save it now. The button never shows it again.</span>
+          </div>
+          <p><strong>In Home Assistant:</strong></p>
+          <ol>
+            <li>Open <em>Settings → Devices &amp; services</em>. The BTHome integration asks for this button's
+              key within a minute (look for a notice to re-authenticate or reconfigure it).</li>
+            <li>Paste the key and submit. Presses and battery work again, now encrypted.</li>
+          </ol>
+          <p class="small muted">Adding the button to BTHome for the first time? Home Assistant asks for the key
+            when you add it.</p>
+        </div>
+        <div id="key-off-note" class="note warn" hidden>
+          <p><strong>Encryption is off.</strong> Once Home Assistant has a key, it ignores unencrypted
+            adverts as a safety measure. Delete the button's BTHome device in Home Assistant and add it again,
+            without a key.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Light</h2>
+      <div class="row">
+        <input type="color" id="color" value="#ff8800" aria-label="Steady color">
+        <button id="color-set">Set color</button>
+        <button id="color-off">Off</button>
+      </div>
+      <div class="row">
+        <select id="preset" aria-label="Animation"></select>
+        <label class="row small" style="gap:6px">Repeat
+          <input type="number" id="repeat" min="0" max="255" value="1" style="width:80px">
+        </label>
+        <button id="play">Play</button>
+        <button id="stop">Stop</button>
+      </div>
+      <p class="small muted" style="margin-top:6px">Repeat 0 loops until stopped. Animations play over the
+        steady color, which comes back after them.</p>
+      <details>
+        <summary>Custom animation</summary>
+        <textarea id="steps" spellcheck="false">ff0000:300 000000:300 0000ff:300 000000:300</textarea>
+        <div class="row" style="margin-top:8px">
+          <button id="play-custom">Play custom</button>
+          <span class="small muted">Steps are <code>COLOR:MS</code>, or <code>COLOR:MS:fade</code> to fade into
+            the color; up to 40.</span>
+        </div>
+      </details>
+    </section>
+
+    <section class="card">
+      <h2>Settings</h2>
+      <form id="settings">
+        <div class="grid">
+          <label class="field"><span>Brightness (1–255)</span>
+            <div class="row"><input type="range" name="brightness" min="1" max="255">
+              <output id="brightness-out" class="small"></output></div></label>
+          <label class="field"><span>Color while held</span>
+            <div class="row"><input type="color" name="pressColor">
+              <label class="row small" style="gap:6px"><input type="checkbox" name="pressNone"> None</label></div></label>
+          <label class="field"><span>Long press after (ms)</span>
+            <input type="number" name="longPressMs" min="300" max="5000" step="50"></label>
+          <label class="field"><span>Double/triple click window (ms)</span>
+            <input type="number" name="multiClickMs" min="100" max="1000" step="10"></label>
+          <label class="field"><span>Advert interval when idle (ms)</span>
+            <input type="number" name="advertIntervalMs" min="100" max="10000" step="50"></label>
+          <label class="field"><span>Low battery below (%)</span>
+            <input type="number" name="lowBatteryPct" min="0" max="100"></label>
+        </div>
+        <div class="checks">
+          <label><input type="checkbox" name="lowBatteryWarning"> <span>Two red blinks after a press when the
+            battery is low</span></label>
+          <label><input type="checkbox" name="bootBattery"> <span>The power-up blink shows the battery
+            (green, amber or red) instead of white</span></label>
+          <label><input type="checkbox" name="restoreLed"> <span>Keep the steady color across restarts</span></label>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <button class="primary" type="submit">Save settings</button>
+          <button type="button" id="settings-reload">Undo changes</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Name</h2>
+      <p class="small muted">Up to 26 characters (plain letters, digits and punctuation). Adverts carry the
+        first 15 (7 with encryption on); Home Assistant reads the full name.</p>
+      <div class="row">
+        <input id="name" maxlength="26" style="flex:1; min-width:200px" aria-label="Name">
+        <button id="name-save">Save name</button>
+        <button id="name-default">Use the default</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Maintenance</h2>
+      <div class="row">
+        <button data-cmd="reboot">Restart the button</button>
+        <button data-cmd="defaults" class="danger">Restore defaults</button>
+      </div>
+      <p class="small muted" style="margin-top:8px">Restore defaults resets the settings, name and steady color.
+        It keeps the encryption key.</p>
+    </section>
+  </main>
+
+  <div id="status" role="status" aria-live="polite">Not connected.</div>
+
+  <footer>
+    Everything happens between this page and your button over Bluetooth; nothing is sent anywhere else.
+    Command-line equivalent: <code>firmware/abutton_ble.py</code>.
+  </footer>
+</div>
+
+<script type="application/json" id="presets">
+[
+  {"name": "Aurora", "repeat": 0, "steps": [{"ms": 1800, "color": [0, 200, 160], "fade": true}, {"ms": 1600, "color": [40, 255, 90], "fade": true}, {"ms": 1400, "color": [0, 122, 140], "fade": true}, {"ms": 900, "color": [26, 255, 156], "fade": true}, {"ms": 2000, "color": [130, 40, 255], "fade": true}, {"ms": 1500, "color": [30, 60, 255], "fade": true}, {"ms": 1200, "color": [200, 40, 200], "fade": true}, {"ms": 1600, "color": [0, 40, 58], "fade": true}, {"ms": 1400, "color": [0, 200, 160], "fade": true}]},
+  {"name": "Rainbow", "repeat": 0, "steps": [{"ms": 700, "color": [255, 0, 0], "fade": true}, {"ms": 700, "color": [255, 160, 0], "fade": true}, {"ms": 700, "color": [0, 255, 0], "fade": true}, {"ms": 700, "color": [0, 255, 255], "fade": true}, {"ms": 700, "color": [0, 0, 255], "fade": true}, {"ms": 700, "color": [255, 0, 255], "fade": true}]},
+  {"name": "Breathe", "repeat": 0, "steps": [{"ms": 1600, "color": [0, 180, 255], "fade": true}, {"ms": 300, "color": [0, 180, 255], "fade": false}, {"ms": 1800, "color": [0, 12, 20], "fade": true}, {"ms": 500, "color": [0, 12, 20], "fade": false}]},
+  {"name": "Police", "repeat": 6, "steps": [{"ms": 70, "color": [255, 0, 0], "fade": false}, {"ms": 50, "color": [0, 0, 0], "fade": false}, {"ms": 70, "color": [255, 0, 0], "fade": false}, {"ms": 160, "color": [0, 0, 0], "fade": false}, {"ms": 70, "color": [0, 0, 255], "fade": false}, {"ms": 50, "color": [0, 0, 0], "fade": false}, {"ms": 70, "color": [0, 0, 255], "fade": false}, {"ms": 160, "color": [0, 0, 0], "fade": false}]},
+  {"name": "Doorbell", "repeat": 1, "steps": [{"ms": 120, "color": [255, 255, 255], "fade": false}, {"ms": 90, "color": [0, 0, 0], "fade": false}, {"ms": 120, "color": [255, 255, 255], "fade": false}, {"ms": 600, "color": [255, 120, 0], "fade": true}, {"ms": 1500, "color": [255, 120, 0], "fade": false}, {"ms": 2500, "color": [0, 0, 0], "fade": true}]}
+]
+</script>
+
+<script type="module">
+import * as A from "./abutton.js";
+
+const $ = (id) => document.getElementById(id);
+const presets = JSON.parse($("presets").textContent);
+const form = $("settings");
+let device = null;
+let ch = {};
+let queue = Promise.resolve();
+
+function status(text, kind = "") {
+  $("status").textContent = text;
+  $("status").className = kind;
+}
+
+// Web Bluetooth allows one GATT operation at a time: run every action through this queue.
+function run(what, fn) {
+  queue = queue.then(async () => {
+    document.querySelectorAll("#app button, #connect").forEach((b) => (b.disabled = true));
+    status(`${what}…`);
+    try {
+      const done = await fn();
+      status(done || `${what}: done.`, "ok");
+    } catch (err) {
+      console.error(err);
+      status(`${what}: ${err.message || err}`, "bad");
+    } finally {
+      document.querySelectorAll("#app button, #connect").forEach((b) => (b.disabled = false));
+    }
+  });
+  return queue;
+}
+
+const write = (c, data) => c.writeValueWithResponse(data);
+const read = async (c) => new Uint8Array((await c.readValue()).buffer);
+
+// ---- connecting ----------------------------------------------------------------------
+if (!navigator.bluetooth) {
+  $("unsupported").hidden = false;
+  $("insecure").hidden = window.isSecureContext;
+  $("connect").disabled = true;
+}
+
+for (const p of presets) $("preset").add(new Option(p.name, p.name));
+$("preset").addEventListener("change", () => {
+  $("repeat").value = presets.find((p) => p.name === $("preset").value).repeat;
+});
+if (presets.length) $("repeat").value = presets[0].repeat;
+
+async function choose(all) {
+  const opts = { optionalServices: [A.SERVICE, "device_information"] };
+  device = await navigator.bluetooth.requestDevice(
+    all ? { acceptAllDevices: true, ...opts } : { filters: [{ services: [A.SERVICE] }], ...opts });
+  device.addEventListener("gattserverdisconnected", disconnected);
+  await open();
+}
+
+async function open() {
+  let server, last;
+  for (let i = 0; i < 3 && !server; i++) {      // a first attempt often times out
+    try {
+      server = await device.gatt.connect();
+    } catch (err) {
+      last = err;
+    }
+  }
+  if (!server) throw last;
+  let svc;
+  try {
+    svc = await server.getPrimaryService(A.SERVICE);
+  } catch {
+    device.gatt.disconnect();
+    throw new Error("no AButton service: stock firmware, or AButton older than 0.2.0");
+  }
+  ch = {};
+  for (const [k, u] of [["led", A.LED], ["config", A.CONFIG], ["name", A.NAME], ["command", A.COMMAND]]) {
+    ch[k] = await svc.getCharacteristic(u);
+  }
+  ch.key = await svc.getCharacteristic(A.KEY).catch(() => null);
+  let fw = "unknown";
+  try {
+    const dis = await server.getPrimaryService("device_information");
+    fw = new TextDecoder().decode(await read(await dis.getCharacteristic("firmware_revision_string")));
+  } catch { /* not readable */ }
+  $("dev-fw").textContent = `Firmware ${fw}`;
+  await refresh();
+  $("intro").hidden = true;
+  $("app").hidden = false;
+  $("connect").textContent = "Connect another";
+  return `Connected to ${$("dev-name").textContent}.`;
+}
+
+async function refresh() {
+  $("dev-name").textContent = new TextDecoder().decode(await read(ch.name)) || device.name || "AButton";
+  $("name").value = $("dev-name").textContent;
+  showLed(A.decodeLed(await read(ch.led)));
+  fillSettings(A.decodeConfig(await read(ch.config)));
+  showEncryption(ch.key ? Boolean((await read(ch.key))[0]) : null);
+}
+
+function disconnected() {
+  $("app").hidden = true;
+  $("intro").hidden = false;
+  $("connect").textContent = "Connect a button";
+  $("key-result").hidden = true;
+  $("key-value").textContent = "";
+  status("Disconnected.");
+}
+
+$("connect").addEventListener("click", () => run("Connecting", () => choose(false)));
+$("connect-all").addEventListener("click", () => run("Connecting", () => choose(true)));
+$("disconnect").addEventListener("click", () => device && device.gatt.disconnect());
+
+// ---- light ---------------------------------------------------------------------------
+function showLed({ color, animating }) {
+  const orb = $("orb");
+  const on = color.some((v) => v);
+  orb.style.setProperty("--c", A.hexColor(on ? color : [0, 0, 0]));
+  orb.classList.toggle("off", !on && !animating);
+  orb.classList.toggle("animating", animating);
+  if (on) $("color").value = A.hexColor(color);
+}
+
+async function playSteps(steps, repeat) {
+  for (const w of A.ledAnimation(steps, repeat)) await write(ch.led, w);
+  showLed({ color: A.decodeLed(await read(ch.led)).color, animating: true });
+}
+
+$("color-set").addEventListener("click", () => run("Setting the color", async () => {
+  const c = A.parseHexColor($("color").value);
+  await write(ch.led, A.ledColor(c));
+  showLed({ color: c, animating: false });
+}));
+$("color-off").addEventListener("click", () => run("Turning the light off", async () => {
+  await write(ch.led, A.ledColor(null));
+  showLed({ color: [0, 0, 0], animating: false });
+}));
+$("play").addEventListener("click", () => run("Playing", async () => {
+  const p = presets.find((x) => x.name === $("preset").value);
+  await playSteps(p.steps, Number($("repeat").value));
+  return `Playing ${p.name}.`;
+}));
+$("play-custom").addEventListener("click", () => run("Playing", async () => {
+  await playSteps(A.parseSteps($("steps").value), Number($("repeat").value));
+  return "Playing the custom animation.";
+}));
+$("stop").addEventListener("click", () => run("Stopping", async () => {
+  await write(ch.led, A.ledStop());
+  showLed(A.decodeLed(await read(ch.led)));
+}));
+
+// ---- settings ------------------------------------------------------------------------
+function fillSettings(cfg) {
+  const f = form.elements;
+  f.brightness.value = cfg.brightness;
+  $("brightness-out").textContent = cfg.brightness;
+  const none = cfg.pressColor.every((v) => v === 0);
+  f.pressNone.checked = none;
+  f.pressColor.value = none ? "#ffffff" : A.hexColor(cfg.pressColor);
+  f.pressColor.disabled = none;
+  for (const k of ["longPressMs", "multiClickMs", "advertIntervalMs", "lowBatteryPct"]) f[k].value = cfg[k];
+  f.lowBatteryWarning.checked = Boolean(cfg.flags & A.FLAG_LOW_BATTERY_WARNING);
+  f.bootBattery.checked = Boolean(cfg.flags & A.FLAG_BOOT_BATTERY);
+  f.restoreLed.checked = Boolean(cfg.flags & A.FLAG_RESTORE_LED);
+}
+
+function readSettings() {
+  const f = form.elements;
+  return {
+    flags: (f.lowBatteryWarning.checked ? A.FLAG_LOW_BATTERY_WARNING : 0)
+      | (f.bootBattery.checked ? A.FLAG_BOOT_BATTERY : 0) | (f.restoreLed.checked ? A.FLAG_RESTORE_LED : 0),
+    brightness: Number(f.brightness.value),
+    pressColor: f.pressNone.checked ? [0, 0, 0] : A.parseHexColor(f.pressColor.value),
+    longPressMs: Number(f.longPressMs.value),
+    multiClickMs: Number(f.multiClickMs.value),
+    advertIntervalMs: Number(f.advertIntervalMs.value),
+    lowBatteryPct: Number(f.lowBatteryPct.value),
+  };
+}
+
+form.elements.brightness.addEventListener("input", (e) => ($("brightness-out").textContent = e.target.value));
+form.elements.pressNone.addEventListener("change", (e) => (form.elements.pressColor.disabled = e.target.checked));
+form.addEventListener("submit", (e) => {
+  e.preventDefault();
+  run("Saving settings", async () => {
+    await write(ch.config, A.encodeConfig(readSettings()));
+    fillSettings(A.decodeConfig(await read(ch.config)));
+    return "Settings saved on the button.";
+  });
+});
+$("settings-reload").addEventListener("click", () => run("Reading settings", async () => {
+  fillSettings(A.decodeConfig(await read(ch.config)));
+  return "Settings as stored on the button.";
+}));
+
+// ---- name ----------------------------------------------------------------------------
+async function setName(name) {
+  await write(ch.name, A.encodeName(name));
+  $("dev-name").textContent = new TextDecoder().decode(await read(ch.name));
+  $("name").value = $("dev-name").textContent;
+  return `Name: ${$("dev-name").textContent}.`;
+}
+$("name-save").addEventListener("click", () => run("Saving the name", () => setName($("name").value.trim())));
+$("name-default").addEventListener("click", () => run("Resetting the name", () => setName("")));
+
+// ---- commands ------------------------------------------------------------------------
+const commands = {
+  identify: [A.CMD_IDENTIFY, "Identifying", null],
+  reboot: [A.CMD_REBOOT, "Restarting", "Restart the button? This page disconnects."],
+  defaults: [A.CMD_DEFAULTS, "Restoring defaults",
+    "Reset the settings, name and steady color to the defaults? The encryption key stays."],
+};
+document.querySelectorAll("[data-cmd]").forEach((b) => b.addEventListener("click", () => {
+  const [code, what, ask] = commands[b.dataset.cmd];
+  if (ask && !confirm(ask)) return;
+  run(what, async () => {
+    await write(ch.command, Uint8Array.of(code));
+    if (code === A.CMD_DEFAULTS) await refresh();
+  });
+}));
+
+// ---- encryption ----------------------------------------------------------------------
+function showEncryption(on) {
+  $("enc-unsupported").hidden = on !== null;
+  $("enc-body").hidden = on === null;
+  const pill = $("enc-pill");
+  pill.textContent = on === null ? "not available" : on ? "On" : "Off";
+  pill.className = "pill " + (on ? "ok" : "warn");
+  $("key-generate").textContent = on ? "Change the key" : "Turn on encryption";
+  $("key-off").hidden = !on;
+}
+
+async function storeKey(key) {
+  try {
+    await write(ch.key, key || A.KEY_OFF);
+  } catch (err) {
+    throw new Error(`the button refused. Press the button once, then try again within ${A.PRESENCE_S} seconds. `
+      + `(${err.message || err})`);
+  }
+  const on = Boolean((await read(ch.key))[0]);
+  if (on !== Boolean(key)) throw new Error("the button did not take the change");
+  showEncryption(on);
+  $("key-off-note").hidden = on;
+  $("key-result").hidden = !on;
+  $("key-value").textContent = on ? A.keyHex(key) : "";
+  return on ? "Encryption is on. Copy the key into Home Assistant." : "Encryption is off.";
+}
+
+$("key-generate").addEventListener("click", () => run("Storing a new key", () => storeKey(A.generateKey())));
+$("key-use").addEventListener("click", () => run("Storing your key", () => storeKey(A.parseKey($("key-input").value))));
+$("key-off").addEventListener("click", () => {
+  if (!confirm("Turn off encryption? Presses are then sent in the clear, and Home Assistant needs the button "
+    + "added again without a key.")) return;
+  run("Turning off encryption", () => storeKey(null));
+});
+$("key-copy").addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText($("key-value").textContent);
+    status("Key copied.", "ok");
+  } catch {
+    status("Copy failed: select the key and copy it by hand.", "bad");
+  }
+});
+</script>
+</body>
+</html>
