@@ -13,7 +13,7 @@ Progress (verified sectors) is kept in IMAGE.state; a window that closes mid-sec
 redoes that sector next time. Sectors below 0x1000 (SS: MAC + factory data) are refused,
 and the unit's factory serial must match --expect-serial before anything is written.
 
-  python3 echobtn_resume_flash.py ../firmware/prebuilt/abutton-0.3.0.bin \\
+  python3 echobtn_resume_flash.py ../firmware/prebuilt/abutton-0.4.0.bin \\
       --sectors 0x1000,0x4000-0x1e000 --expect-serial <the unit's 16-char serial>
 """
 

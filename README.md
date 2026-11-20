@@ -19,11 +19,11 @@ https://github.com/user-attachments/assets/a3f55fe2-0d2b-4031-b9c9-473aa6e054a4
 Custom firmware is not required to use the button with Home Assistant.
 
 [`firmware/`](firmware/README.md) has **AButton**, replacement firmware built from source for
-the button's chip: it never sleeps, reports presses (single, double, triple, long) and battery
+the button's chip: it stays on (with an optional light sleep), reports presses (single, double, triple, long) and battery
 as BTHome over BLE, so ESPHome Bluetooth proxies relay them to Home Assistant, and updates
-over the air with signed images. This integration (0.2.0+) discovers AButtons too and gives
+over the air with signed images. This integration discovers AButtons too and gives
 them the same LED light entity and `play_animation` action, an Identify button, and the
-button's settings. Its presses can be encrypted (0.3.0), and a [web page](web/) sets a button
+button's settings. Its presses can be encrypted, and a [web page](web/) sets a button
 up from Chrome or Edge over Web Bluetooth. It needs a one-time wired flash:
 four wires soldered to the test pads in the battery compartment and a 3.3 V USB-serial
 adapter. **[`firmware/GUIDE.md`](firmware/GUIDE.md)** is the step-by-step procedure, and

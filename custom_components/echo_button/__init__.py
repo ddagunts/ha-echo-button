@@ -27,6 +27,7 @@ from .abutton import (
     FLAG_LOW_BATTERY_WARNING,
     FLAG_RESTORE_LED,
     Config as AConfig,
+    Power as APower,
 )
 from .abutton_client import (
     WRITE_ERRORS as ABUTTON_ERRORS,
@@ -49,6 +50,8 @@ from .const import (
     CONF_MULTI_CLICK_MS,
     CONF_PRESS_COLOR,
     CONF_RESTORE_LED,
+    CONF_SLEEP,
+    CONF_TX_POWER,
     DEFAULT_ABUTTON_PRESS_COLOR,
     DEFAULT_KEEP_AWAKE,
     DEFAULT_KEEP_AWAKE_SECONDS,
@@ -56,6 +59,7 @@ from .const import (
     DOMAIN,
     KIND_ABUTTON,
     SERVICE_PLAY_ANIMATION,
+    TX_POWER_MAX,
 )
 from .link import BluezLink
 from .protocol import MAX_REPEAT, MAX_STEP_MS, MAX_STEPS, parse_color
@@ -186,6 +190,12 @@ def abutton_config(options) -> AConfig:
     )
 
 
+def abutton_power(options) -> APower:
+    """The button's transmit power and sleep from the entry options (defaults where unset)."""
+    tx = options.get(CONF_TX_POWER, TX_POWER_MAX)
+    return APower(tx_power=None if tx == TX_POWER_MAX else int(tx), sleep=bool(options.get(CONF_SLEEP, False)))
+
+
 async def _async_setup_abutton(hass: HomeAssistant, entry: EchoButtonConfigEntry) -> bool:
     # A button that ran the stock firmware may still be paired over Classic on this host,
     # which makes every BLE connection fail (br-connection-create-socket).
@@ -193,6 +203,7 @@ async def _async_setup_abutton(hass: HomeAssistant, entry: EchoButtonConfigEntry
     client = AButtonClient(hass, entry.data[CONF_ADDRESS], _LOGGER)
     entry.runtime_data = AButtonData(client)
     # Sent on the next connection (the first LED change, identify, or an options change).
+    client.set_power(abutton_power(entry.options))
     await client.set_config(abutton_config(entry.options), push=False)
     await hass.config_entries.async_forward_entry_setups(entry, ABUTTON_PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_async_abutton_options_updated))
@@ -201,6 +212,7 @@ async def _async_setup_abutton(hass: HomeAssistant, entry: EchoButtonConfigEntry
 
 async def _async_abutton_options_updated(hass: HomeAssistant, entry: EchoButtonConfigEntry) -> None:
     client: AButtonClient = entry.runtime_data.client
+    client.set_power(abutton_power(entry.options))
     try:
         await client.set_config(abutton_config(entry.options))
     except (AButtonUnavailableError, *ABUTTON_ERRORS) as err:

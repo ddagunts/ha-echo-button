@@ -56,6 +56,8 @@ class AButtonClient:
         self._idle: asyncio.TimerHandle | None = None
         self._config: A.Config | None = None        # pushed on every connect
         self._config_sent = False
+        self._power: A.Power | None = None          # likewise
+        self._power_sent = False
         self.firmware: str | None = None
         self.connected = False
         self._listeners: list[Callable[[str], None]] = []
@@ -77,6 +79,28 @@ class AButtonClient:
     async def _connect(self) -> BleakClientWithServiceCache:
         if self._client is not None and self._client.is_connected:
             return self._client
+        client = await self._open()
+        if client.services.get_service(A.SERVICE_UUID) is None:
+            await client.disconnect()
+            raise AButtonUnavailableError(f"{self.address} has no AButton service (stock firmware?)")
+        try:
+            self.firmware = bytes(await client.read_gatt_char(A.FIRMWARE_REVISION_UUID)).decode(errors="replace")
+        except WRITE_ERRORS:
+            pass
+        if client.services.get_characteristic(A.POWER_UUID) is None:
+            # A proxy (or BlueZ) can serve the GATT table it cached before an OTA update.
+            self._log.debug("AButton %s: firmware %s, refreshing its cached GATT services",
+                            self.address, self.firmware)
+            await client.clear_cache()
+            await client.disconnect()
+            client = await self._open()
+        self._client = client
+        self.connected = True
+        self._config_sent = False
+        self._power_sent = False
+        return client
+
+    async def _open(self) -> BleakClientWithServiceCache:
         try:
             client = await self._establish()
         except BleakError as err:
@@ -85,17 +109,6 @@ class AButtonClient:
             # BlueZ re-creates the device as BLE from its next advert (every 250 ms by default).
             await asyncio.sleep(3)
             client = await self._establish()
-        if client.services.get_service(A.SERVICE_UUID) is None:
-            await client.disconnect()
-            raise AButtonUnavailableError(f"{self.address} has no AButton service (stock firmware?)")
-        self._client = client
-        self.connected = True
-        self._config_sent = False
-        if self.firmware is None:
-            try:
-                self.firmware = bytes(await client.read_gatt_char(A.FIRMWARE_REVISION_UUID)).decode(errors="replace")
-            except WRITE_ERRORS:
-                pass
         return client
 
     def _on_disconnect(self, _client) -> None:
@@ -127,6 +140,9 @@ class AButtonClient:
                 if self._config is not None and not self._config_sent:
                     await client.write_gatt_char(A.CONFIG_UUID, self._config.encode(), response=True)
                     self._config_sent = True
+                if self._power is not None and not self._power_sent:
+                    await client.write_gatt_char(A.POWER_UUID, self._power.encode(), response=True)
+                    self._power_sent = True
                 for payload in payloads:
                     await client.write_gatt_char(uuid, payload, response=True)
             except WRITE_ERRORS:
@@ -147,9 +163,14 @@ class AButtonClient:
     async def identify(self) -> None:
         await self._write(A.COMMAND_UUID, [bytes([A.CMD_IDENTIFY])])
 
+    def set_power(self, power: A.Power) -> None:
+        """Remember the power settings; they go out with the next write (see set_config)."""
+        self._power = power
+        self._power_sent = False
+
     async def set_config(self, config: A.Config, push: bool = True) -> None:
         """Remember the settings (pushed on every connect); write them now if `push`."""
         self._config = config
         self._config_sent = False
         if push:
-            await self._write(A.CONFIG_UUID, [])     # _write sends a pending config first
+            await self._write(A.CONFIG_UUID, [])     # _write sends pending config and power first

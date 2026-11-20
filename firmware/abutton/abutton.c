@@ -1,8 +1,9 @@
 /*
  * AButton: open firmware for the Amazon Echo Button (Cypress CYW20735B0, board rev 1).
  *
- *   - Never sleeps: the sleep framework is told sleep is not allowed, and there is no
- *     idle shutdown, so the button is always advertising and every press counts.
+ *   - Always on: there is no idle shutdown, so the button is always advertising and every
+ *     press counts. By default the chip never sleeps; the light sleep option lets it sleep
+ *     between events (see "Light sleep" below). The transmit power can be lowered.
  *   - BTHome v2 over BLE advertisements (service data UUID 0xFCD2), which ESPHome
  *     Bluetooth proxies relay to Home Assistant: button events (press, double, triple,
  *     long, long-double, long-triple) and battery %. Optionally encrypted (AES-CCM, the
@@ -44,6 +45,13 @@
  *                     Only within KEY_PRESENCE_S of a button press (else Insufficient
  *                     Authorization, 0x08), so changing the key needs someone at the button.
  *                     Restore defaults keeps the key.
+ *   Power   0e5a1006  read/write the 4-byte abtn_power_t below (version 1): transmit power
+ *                     (0x7f = the radio's default, its maximum; else -16..12 dBm, nearest
+ *                     step of the ROM table) and light sleep (0 off, 1 on). Kept in NVRAM.
+ *
+ * Light sleep (off by default): the chip may sleep (PDS: RAM, pins and timers kept, adverts
+ * keep going) while the LED is dark, nothing is connected and no OTA runs; the button is then
+ * sampled every BTN_POLL_IDLE_MS while idle, every BTN_POLL_MS once it reads down.
  *
  * BTHome encryption: AES-128-CCM as Home Assistant's BTHome integration expects (bthome.c).
  * The counter in each advert keeps rising across reboots (reserved in NVRAM in blocks), so
@@ -142,6 +150,15 @@ typedef struct { uint8_t magic[2]; uint8_t len; char name[IDENTITY_NAME_MAX]; } 
 typedef struct { uint8_t magic[2]; uint8_t rgb[3]; } nv_led_t;
 typedef struct { uint8_t magic[2]; uint8_t on; uint8_t key[BTHOME_KEY_LEN]; } nv_key_t;
 typedef struct { uint8_t magic[2]; uint32_t next; } nv_counter_t;   /* first counter not yet used */
+
+typedef struct
+{
+    uint8_t version;                                /* POWER_VERSION */
+    int8_t  tx_power;                               /* TX_POWER_DEFAULT, or TX_POWER_MIN..TX_POWER_MAX dBm */
+    uint8_t sleep;                                  /* 0 = never sleep, 1 = light sleep when idle */
+    uint8_t reserved;                               /* 0 */
+} abtn_power_t;                                     /* 4 bytes */
+typedef struct { uint8_t magic[2]; abtn_power_t p; } nv_power_t;
 #pragma pack()
 
 #define NV_CONFIG               (WICED_NVRAM_VSID_START + 0)
@@ -149,6 +166,19 @@ typedef struct { uint8_t magic[2]; uint32_t next; } nv_counter_t;   /* first cou
 #define NV_LED                  (WICED_NVRAM_VSID_START + 2)
 #define NV_KEY                  (WICED_NVRAM_VSID_START + 3)
 #define NV_COUNTER              (WICED_NVRAM_VSID_START + 4)
+#define NV_POWER                (WICED_NVRAM_VSID_START + 5)
+
+#define POWER_VERSION           1
+#define TX_POWER_DEFAULT        0x7F                /* leave the radio at its default: its maximum */
+#define TX_POWER_MIN            (-16)               /* the ROM's dBm table: +12 down to -16 in 4 dB steps */
+#define TX_POWER_MAX            12
+
+static const abtn_power_t power_default = { POWER_VERSION, TX_POWER_DEFAULT, 0, 0 };
+
+/* ROM (B0, not in the SDK headers): the advert transmit power in dBm, for every advert
+ * stream; requests round to the nearest table step and clamp at +12 (research/
+ * firmware_access.md, "Transmit power and range"). */
+extern void blecm_setTxPowerInADV(int8_t dbm);
 
 static const abtn_config_t cfg_default =
 {
@@ -157,6 +187,7 @@ static const abtn_config_t cfg_default =
 
 /* ---- behavior ------------------------------------------------------------------- */
 #define BTN_POLL_MS             10                  /* button sampling period */
+#define BTN_POLL_IDLE_MS        40                  /* ...while idle with sleep on (fewer wake-ups) */
 #define DEBOUNCE_SAMPLES        2                   /* equal samples to accept a change */
 #define BURST_MS                2500                /* fast advertising after an event */
 #define LED_TICK_MS             20                  /* animation step resolution */
@@ -210,6 +241,8 @@ enum
     HDL_ABTN_CMD_VAL,
     HDL_ABTN_KEY,
     HDL_ABTN_KEY_VAL,
+    HDL_ABTN_POWER,
+    HDL_ABTN_POWER_VAL,
 };
 
 #define RW_PROPS                (LEGATTDB_CHAR_PROP_READ | LEGATTDB_CHAR_PROP_WRITE)
@@ -248,6 +281,8 @@ const uint8_t abtn_gatt_db[] =
             LEGATTDB_CHAR_PROP_WRITE, LEGATTDB_PERM_WRITE_REQ | LEGATTDB_PERM_VARIABLE_LENGTH),
         CHARACTERISTIC_UUID128_WRITABLE(HDL_ABTN_KEY, HDL_ABTN_KEY_VAL, ABTN_UUID(0x05),
             RW_PROPS, RW_PERMS),
+        CHARACTERISTIC_UUID128_WRITABLE(HDL_ABTN_POWER, HDL_ABTN_POWER_VAL, ABTN_UUID(0x06),
+            RW_PROPS, RW_PERMS),
 
     /* WICED secure OTA firmware upgrade service (handles 0xff00..; handled by fw_upgrade_lib) */
     PRIMARY_SERVICE_UUID128(HANDLE_OTA_FW_UPGRADE_SERVICE, UUID_OTA_SEC_FW_UPGRADE_SERVICE),
@@ -269,6 +304,8 @@ extern const wiced_bt_cfg_buf_pool_t app_buf_pools[];
 extern Point                        ecdsa256_public_key;   /* generated from the owner's key */
 
 static abtn_config_t  cfg;
+static abtn_power_t   power;
+static uint16_t       poll_ms;                      /* the button poll timer's current period */
 static char           abtn_name[IDENTITY_NAME_MAX + 1] = "AButton";
 static uint16_t       conn_id;
 static uint8_t        adv_mode = BTM_BLE_ADVERT_OFF;
@@ -406,6 +443,39 @@ static void cfg_save(void)
     nv_config_t    nv = { { 'A', 'C' }, cfg };
     wiced_result_t st;
     wiced_hal_write_nvram(NV_CONFIG, sizeof(nv), (uint8_t *)&nv, &st);
+}
+
+static wiced_bool_t power_valid(const abtn_power_t *p)
+{
+    return p->version == POWER_VERSION && p->sleep <= 1 && p->reserved == 0 &&
+           (p->tx_power == TX_POWER_DEFAULT || (p->tx_power >= TX_POWER_MIN && p->tx_power <= TX_POWER_MAX));
+}
+
+static void power_load(void)
+{
+    nv_power_t     nv;
+    wiced_result_t st;
+    power = power_default;
+    if (wiced_hal_read_nvram(NV_POWER, sizeof(nv), (uint8_t *)&nv, &st) == sizeof(nv) && st == WICED_SUCCESS &&
+        nv.magic[0] == 'A' && nv.magic[1] == 'P' && power_valid(&nv.p))
+        power = nv.p;
+}
+
+static void power_save(void)
+{
+    nv_power_t     nv = { { 'A', 'P' }, power };
+    wiced_result_t st;
+    wiced_hal_write_nvram(NV_POWER, sizeof(nv), (uint8_t *)&nv, &st);
+}
+
+/* The default is left alone at boot. Going back to it at run time sets the table's top step,
+ * which measured the same as the default. */
+static void power_apply_tx(wiced_bool_t changed)
+{
+    if (power.tx_power != TX_POWER_DEFAULT)
+        blecm_setTxPowerInADV(power.tx_power);
+    else if (changed)
+        blecm_setTxPowerInADV(TX_POWER_MAX);
 }
 
 /* The idle (low duty) advert interval, in 0.625 ms units, connectable and not. */
@@ -781,23 +851,34 @@ static void on_button(wiced_bool_t down)
 
 /* The button is polled. On a rev-1 unit the P6 edge interrupt never fired (irqs=0 in the
  * trace while p6 read 0 on every press, 2026-11-19), with the same pin config as stock
- * (0x40D). Polling costs nothing here: the firmware never sleeps. The interrupt is still
- * registered (in stock's order, then cleared, as stock's 0x2185ec does) and only counted,
- * so a trace shows whether it works. */
+ * (0x40D). The interrupt is still registered (in stock's order, then cleared, as stock's
+ * 0x2185ec does) and only counted, so a trace shows whether it works.
+ *
+ * With sleep on, an idle button is sampled every BTN_POLL_IDLE_MS (each sample wakes the
+ * chip); the first sample that reads down switches to BTN_POLL_MS until it is released, so a
+ * press is still debounced at 10 ms and seen within about 50 ms. */
+static void poll_period(uint16_t ms)
+{
+    if (ms == poll_ms)
+        return;
+    wiced_stop_timer(&poll_timer);
+    wiced_start_timer(&poll_timer, ms);
+    poll_ms = ms;
+}
+
 static void button_poll(uint32_t arg)
 {
     static uint8_t differ;
     wiced_bool_t down = wiced_hal_gpio_get_pin_input_status(BTN_PIN) == 0;   /* active low */
     if (down == btn_down)
+        differ = 0;
+    else if (++differ >= DEBOUNCE_SAMPLES)
     {
         differ = 0;
-        return;
+        DBG("button %s (irqs=%u)\n", down ? "down" : "up", (unsigned)btn_irqs);
+        on_button(down);
     }
-    if (++differ < DEBOUNCE_SAMPLES)
-        return;
-    differ = 0;
-    DBG("button %s (irqs=%u)\n", down ? "down" : "up", (unsigned)btn_irqs);
-    on_button(down);
+    poll_period(power.sleep && !btn_down && !differ && !flash_mode ? BTN_POLL_IDLE_MS : BTN_POLL_MS);
 }
 
 static void button_irq(void *data, uint8_t port_pin)
@@ -828,6 +909,7 @@ static void button_init(void)
         presence_mark();                          /* the press that powered it up counts too */
     }
     wiced_start_timer(&poll_timer, BTN_POLL_MS);
+    poll_ms = BTN_POLL_MS;
 }
 
 /* ---- advertising (BTHome v2) ------------------------------------------------------ */
@@ -1080,6 +1162,29 @@ static void reboot_timeout(uint32_t arg)
     wiced_hal_wdog_reset_system();
 }
 
+static wiced_bt_gatt_status_t power_write(const uint8_t *v, uint16_t len)
+{
+    abtn_power_t p;
+    wiced_bool_t tx_changed;
+    if (len != sizeof(p))
+        return WICED_BT_GATT_INVALID_ATTR_LEN;
+    memcpy(&p, v, sizeof(p));
+    if (!power_valid(&p))
+        return WICED_BT_GATT_ILLEGAL_PARAMETER;
+    if (memcmp(&p, &power, sizeof(p)) == 0)
+        return WICED_BT_GATT_SUCCESS;             /* unchanged: no NVRAM write */
+    tx_changed = p.tx_power != power.tx_power;
+    power = p;
+    power_save();
+    if (tx_changed)
+    {
+        power_apply_tx(WICED_TRUE);
+        adv_restart();                            /* the new power takes effect on restart */
+    }
+    WICED_BT_TRACE("power: tx %d, sleep %u\n", power.tx_power, power.sleep);
+    return WICED_BT_GATT_SUCCESS;
+}
+
 static wiced_bt_gatt_status_t command_write(const uint8_t *v, uint16_t len)
 {
     if (len != 1)
@@ -1093,6 +1198,9 @@ static wiced_bt_gatt_status_t command_write(const uint8_t *v, uint16_t len)
         cfg = cfg_default;
         cfg_save();
         cfg_apply_adv_interval();
+        power = power_default;
+        power_save();
+        power_apply_tx(WICED_TRUE);
         memset(base_rgb, 0, 3);
         led_save(0);
         name_write((const uint8_t *)"", 0);
@@ -1141,6 +1249,7 @@ static wiced_bt_gatt_status_t gatt_read(uint16_t conn, wiced_bt_gatt_read_t *p)
     case HDL_ABTN_KEY_VAL:
         led[0] = bthome_encrypt;                  /* on/off only: the key is never read back */
         return read_value(p, led, 1);
+    case HDL_ABTN_POWER_VAL:     return read_value(p, (const uint8_t *)&power, sizeof(power));
     }
     return WICED_BT_GATT_INVALID_HANDLE;
 }
@@ -1158,6 +1267,7 @@ static wiced_bt_gatt_status_t gatt_write(uint16_t conn, wiced_bt_gatt_write_t *p
     case HDL_ABTN_NAME_VAL:   return name_write(p->p_val, p->val_len);
     case HDL_ABTN_CMD_VAL:    return command_write(p->p_val, p->val_len);
     case HDL_ABTN_KEY_VAL:    return key_write(p->p_val, p->val_len);
+    case HDL_ABTN_POWER_VAL:  return power_write(p->p_val, p->val_len);
     }
     return WICED_BT_GATT_WRITE_NOT_PERMIT;
 }
@@ -1212,13 +1322,23 @@ static wiced_bt_gatt_status_t gatt_callback(wiced_bt_gatt_evt_t event, wiced_bt_
 }
 
 /* ---- sleep ---------------------------------------------------------------------- */
-/* Sleep is never allowed: AButton's "off" is the P5 power latch, like stock's. The permit
- * handler is needed: without wiced_sleep_configure, a release build (no transport to keep it
- * awake) goes to sleep and dies within minutes. No wake source: the button is polled, and the
- * device-wake GPIO isn't needed when sleep never happens. */
+/* AButton's "off" is the P5 power latch, like stock's. The permit handler is needed even
+ * with sleep off: without wiced_sleep_configure, a release build (no transport to keep it
+ * awake) goes to sleep and dies within minutes. With sleep on, only sleep without shutdown
+ * (PDS) is allowed: RAM, the pins (P5 above all) and the timers stay, and the timers wake it.
+ * Not while the LED is lit (its PWM runs from the crystal clock), a client is connected, an
+ * OTA runs, the button is down or in flash mode. No wake source: the button is polled. */
+static wiced_bool_t sleep_ok(void)
+{
+    return power.sleep && !conn_id && !ota_active && !flash_mode && !btn_down && !led_timer_on &&
+           !(led_out[0] | led_out[1] | led_out[2]);
+}
+
 static uint32_t sleep_permit(wiced_sleep_poll_type_t type)
 {
-    return type == WICED_SLEEP_POLL_TIME_TO_SLEEP ? 0 : WICED_SLEEP_NOT_ALLOWED;
+    if (type == WICED_SLEEP_POLL_TIME_TO_SLEEP)
+        return sleep_ok() ? WICED_SLEEP_MAX_TIME_TO_SLEEP : 0;
+    return sleep_ok() ? WICED_SLEEP_ALLOWED_WITHOUT_SHUTDOWN : WICED_SLEEP_NOT_ALLOWED;
 }
 
 static void sleep_init(void)
@@ -1251,7 +1371,9 @@ static void app_init(void)
     key_load();
     DBG("addr %B, BTHome encryption %s, counter %u\n", local_addr, bthome_encrypt ? "on" : "off",
         (unsigned)bthome_counter);
-    DBG("app_init: sleep (never)\n");
+    power_load();
+    power_apply_tx(WICED_FALSE);                  /* before the adverts start */
+    DBG("app_init: sleep (%s), tx %d\n", power.sleep ? "light, when idle" : "never", power.tx_power);
     sleep_init();
     WICED_BT_TRACE("AButton %s booting as %s\n", ABTN_FW_VERSION, abtn_name);
 

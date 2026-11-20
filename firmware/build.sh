@@ -3,7 +3,7 @@
 #
 #   firmware/build.sh                 # release build
 #   TRACE=1 firmware/build.sh         # with WICED traces on the HCI UART (bring-up)
-#   ABTN_FW_VERSION=0.3.0 firmware/build.sh
+#   ABTN_FW_VERSION=0.4.0 firmware/build.sh
 #
 # Needs: the SDK (research/install_wiced_b0_sdk.sh), Python 3 with `cryptography`.
 # The OTA signing key is created on first use at ~/.config/abutton/ota_key.pem

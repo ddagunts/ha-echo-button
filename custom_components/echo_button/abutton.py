@@ -14,7 +14,7 @@ Service 0e5a1000-a8b9-4c3b-9d1a-ab7ff0ab7700:
   Command  01 reboot | 02 restore defaults | 03 identify
   Key      read <BTHome encryption on>; write a 16-byte key (encrypt) or 00 (stop). Only
            within 60 s of a press on the button, else ATT error 0x08. Never readable.
-           (0.3.0+)
+  Power    4 bytes, see Power: transmit power and light sleep
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ CONFIG_UUID = "0e5a1002-a8b9-4c3b-9d1a-ab7ff0ab7700"
 NAME_UUID = "0e5a1003-a8b9-4c3b-9d1a-ab7ff0ab7700"
 COMMAND_UUID = "0e5a1004-a8b9-4c3b-9d1a-ab7ff0ab7700"
 KEY_UUID = "0e5a1005-a8b9-4c3b-9d1a-ab7ff0ab7700"
+POWER_UUID = "0e5a1006-a8b9-4c3b-9d1a-ab7ff0ab7700"
 FIRMWARE_REVISION_UUID = "00002a26-0000-1000-8000-00805f9b34fb"
 
 DEFAULT_WRITE_SIZE = 20  # ATT MTU 23 - 3
@@ -60,6 +61,11 @@ PRESS_HINT = "press the button once, then try again within 60 seconds"
 
 CONFIG_VERSION = 1
 _CONFIG = struct.Struct("<BBB3sHHHB")
+
+POWER_VERSION = 1
+_POWER = struct.Struct("<BbBB")
+TX_POWER_DEFAULT = 0x7F                  # on the wire: leave the radio at its default (its maximum)
+TX_POWER_STEPS = (12, 8, 4, 0, -4, -8, -12, -16)   # dBm; the firmware rounds to the nearest
 
 
 def _check_color(color: Color) -> Color:
@@ -114,6 +120,32 @@ class Config:
         if version != CONFIG_VERSION:
             raise ValueError(f"config version {version}, this client knows {CONFIG_VERSION}")
         return cls(flags, brightness, tuple(press), long_ms, multi_ms, adv_ms, low)
+
+
+@dataclass(frozen=True)
+class Power:
+    """Transmit power and sleep (kept in the button's NVRAM)."""
+
+    tx_power: int | None = None   # dBm, -16..12; None = the radio's default, its maximum
+    sleep: bool = False           # light sleep between events (the LED dark, nothing connected)
+
+    def __post_init__(self) -> None:
+        if self.tx_power is not None and not (
+                isinstance(self.tx_power, int) and TX_POWER_STEPS[-1] <= self.tx_power <= TX_POWER_STEPS[0]):
+            raise ValueError(f"transmit power is {TX_POWER_STEPS[-1]}..{TX_POWER_STEPS[0]} dBm, or the default")
+
+    def encode(self) -> bytes:
+        tx = TX_POWER_DEFAULT if self.tx_power is None else self.tx_power
+        return _POWER.pack(POWER_VERSION, tx, int(self.sleep), 0)
+
+    @classmethod
+    def decode(cls, data: bytes) -> Power:
+        if len(data) != _POWER.size:
+            raise ValueError(f"power settings are {len(data)} bytes, expected {_POWER.size}")
+        version, tx, sleep, _ = _POWER.unpack(data)
+        if version != POWER_VERSION:
+            raise ValueError(f"power settings version {version}, this client knows {POWER_VERSION}")
+        return cls(None if tx == TX_POWER_DEFAULT else tx, bool(sleep))
 
 
 @dataclass(frozen=True)

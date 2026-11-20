@@ -12,8 +12,9 @@
   python3 firmware/abutton_ble.py identify AA:BB:CC:DD:EE:FF            # blink white 3 times
   python3 firmware/abutton_ble.py reboot   AA:BB:CC:DD:EE:FF
   python3 firmware/abutton_ble.py defaults AA:BB:CC:DD:EE:FF            # restore all settings
-  python3 firmware/abutton_ble.py key      AA:BB:CC:DD:EE:FF --generate # encrypt BTHome (0.3.0+)
+  python3 firmware/abutton_ble.py key      AA:BB:CC:DD:EE:FF --generate # encrypt BTHome
   python3 firmware/abutton_ble.py key      AA:BB:CC:DD:EE:FF off        # stop encrypting
+  python3 firmware/abutton_ble.py power    AA:BB:CC:DD:EE:FF --tx-power -8 --sleep on
   python3 firmware/abutton_ble.py ota      AA:BB:CC:DD:EE:FF firmware/prebuilt/abutton-X.ota.signed
 
 Animation steps are COLOR:MS or COLOR:MS:fade (fade from the previous color); --repeat 0
@@ -165,11 +166,9 @@ async def info(address: str) -> None:
         print(f"{'name':13s} {(await c.read_gatt_char(A.NAME_UUID)).decode(errors='replace')}")
         led = A.LedState.decode(bytes(await c.read_gatt_char(A.LED_UUID)))
         print(f"{'led':13s} {bytes(led.color).hex()}{' (animating)' if led.animating else ''}")
-        if c.services.get_characteristic(A.KEY_UUID):
-            on = A.encryption_on(bytes(await c.read_gatt_char(A.KEY_UUID)))
-            print(f"{'encryption':13s} {'on (BTHome key set)' if on else 'off'}")
-        else:
-            print(f"{'encryption':13s} not supported (firmware older than 0.3.0)")
+        print_power(A.Power.decode(bytes(await c.read_gatt_char(A.POWER_UUID))))
+        on = A.encryption_on(bytes(await c.read_gatt_char(A.KEY_UUID)))
+        print(f"{'encryption':13s} {'on (BTHome key set)' if on else 'off'}")
         print_config(A.Config.decode(bytes(await c.read_gatt_char(A.CONFIG_UUID))))
     finally:
         await c.disconnect()
@@ -185,6 +184,30 @@ def print_config(cfg: A.Config) -> None:
     print(f"{'low battery':13s} below {cfg.low_battery_pct} %, warning {on(A.FLAG_LOW_BATTERY_WARNING)}")
     print(f"{'boot blink':13s} {'battery color' if cfg.flag(A.FLAG_BOOT_BATTERY) else 'white'}")
     print(f"{'restore LED':13s} {on(A.FLAG_RESTORE_LED)}")
+
+
+def print_power(p: A.Power) -> None:
+    print(f"{'tx power':13s} {'maximum (default)' if p.tx_power is None else f'{p.tx_power:+d} dBm'}")
+    print(f"{'sleep':13s} {'light sleep when idle' if p.sleep else 'never (default)'}")
+
+
+async def power(address: str, args: argparse.Namespace) -> None:
+    c = await connect(address)
+    try:
+        need_abutton(c)
+        cur = A.Power.decode(bytes(await c.read_gatt_char(A.POWER_UUID)))
+        new = cur
+        if args.tx_power is not None:
+            new = A.Power(None if args.tx_power == "max" else int(args.tx_power), new.sleep)
+        if args.sleep is not None:
+            new = A.Power(new.tx_power, args.sleep == "on")
+        if new != cur:
+            await c.write_gatt_char(A.POWER_UUID, new.encode(), response=True)
+            new = A.Power.decode(bytes(await c.read_gatt_char(A.POWER_UUID)))
+            print("saved on the button:")
+        print_power(new)
+    finally:
+        await c.disconnect()
 
 
 async def write(address: str, uuid: str, payloads: list[bytes], what: str) -> None:
@@ -228,8 +251,6 @@ async def set_key(address: str, key: bytes | None) -> None:
     c = await connect(address)
     try:
         need_abutton(c)
-        if not c.services.get_characteristic(A.KEY_UUID):
-            raise RuntimeError("this firmware has no BTHome encryption (older than 0.3.0)")
         try:
             await c.write_gatt_char(A.KEY_UUID, key or A.KEY_OFF, response=True)
         except BleakError as err:
@@ -251,9 +272,6 @@ async def key_status(address: str) -> None:
     c = await connect(address)
     try:
         need_abutton(c)
-        if not c.services.get_characteristic(A.KEY_UUID):
-            print("no BTHome encryption in this firmware (older than 0.3.0)")
-            return
         on = A.encryption_on(bytes(await c.read_gatt_char(A.KEY_UUID)))
         print(f"BTHome encryption is {'on' if on else 'off'}")
     finally:
@@ -345,6 +363,12 @@ def main() -> None:
     k.add_argument("address")
     k.add_argument("key", nargs="?", help="32 hex characters, or off; omit to show the state")
     k.add_argument("--generate", action="store_true", help="make a random key, store it and print it")
+    pw = sub.add_parser("power", help="show or change transmit power and sleep")
+    pw.add_argument("address")
+    pw.add_argument("--tx-power", choices=["max"] + [str(d) for d in A.TX_POWER_STEPS],
+                    help="advert transmit power in dBm; max = the radio's default")
+    pw.add_argument("--sleep", choices=("on", "off"),
+                    help="light sleep between events while the LED is dark (saves battery)")
     o = sub.add_parser("ota", help="install a signed firmware image")
     o.add_argument("address")
     o.add_argument("image")
@@ -380,6 +404,8 @@ def main() -> None:
             job = write(args.address, A.COMMAND_UUID, [bytes([code])], f"{args.cmd}: done")
         elif args.cmd == "config":
             job = configure(args.address, args)
+        elif args.cmd == "power":
+            job = power(args.address, args)
         else:
             job = ota(args.address, Path(args.image).read_bytes())
         asyncio.run(job)

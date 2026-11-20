@@ -23,25 +23,30 @@ Where the firmware work stands (November 2026). The how-to is
 | BTHome adverts continue while a client is connected (non-connectable) | verified (21 adverts in 10 s while connected) |
 | Home Assistant: discovery, LED light, play_animation, identify, options | verified on a live Home Assistant (integration 0.2.1), plus `tests_ha/` |
 | A stock button switched to AButton: its old Classic pairing in the HA host's BlueZ | removed automatically by integration 0.2.1 (caused `br-connection-create-socket`) |
-| BTHome encryption (0.3.0): AES-128-CCM adverts, key set over GATT after a press | verified on a rev-1 unit (2026-11-19): key taken after a press, refused 60 s later; adverts decrypt with the scanned address; counter 256 after a reboot; key kept. Encoder host-tested against bthome-ble. Home Assistant's BTHome integration took the key and decodes the presses |
+| BTHome encryption: AES-128-CCM adverts, key set over GATT after a press | verified on a rev-1 unit (2026-11-19): key taken after a press, refused 60 s later; adverts decrypt with the scanned address; counter 256 after a reboot; key kept. Encoder host-tested against bthome-ble. Home Assistant's BTHome integration took the key and decodes the presses |
 | Web Bluetooth setup page (`web/`, GitHub Pages) | verified: encryption turned on for a second unit from the published page |
+| Transmit power setting (Power characteristic) | verified (2026-11-19): received at 1 ft −34 dBm at the default, −45.5 at 0 dBm, −66 at −16; kept across a restart and applied at boot |
+| Light sleep option | verified on a rev-1 unit (2026-11-19): adverts at the same rate as a unit without it (25-minute side-by-side soak, no restart), connections work, presses reach Home Assistant. The power it saves is **not measured** |
+| Home Assistant options for transmit power and sleep (integration 0.3.0) | `tests_ha/` only; not yet on a live Home Assistant |
 
-Current build: **0.3.0** (`firmware/prebuilt/`): the release build runs on both test units
-(installed over the air). 0.3.0 adds BTHome encryption to 0.2.1 (which added the
-experimental UART flash mode).
+Current build: **0.4.0** (`firmware/prebuilt/`): the release build runs on both test units
+(installed over the air).
 
 ## Open
 
+- **Battery saving isn't measured.** The current drawn with light sleep on and off (a meter
+  in series with the cells) would show what it saves.
+- **Integration 0.3.0** (transmit power and sleep options) hasn't run on a live Home Assistant.
 - **Battery %** is only measured while the LED is dark (the LED's load sags it), so a
   constantly lit LED freezes the value. Fresh cells read 77–100 %; discharge not yet checked.
-- **UART flash mode (0.2.1):** hold the button 8 s at power-up (magenta LED); the firmware
+- **UART flash mode:** hold the button 8 s at power-up (magenta LED); the firmware
   stops advertising, starts the HCI UART and clears `btu_hcievt_handler`, so the ROM's HCI
   filter lets the flasher's vendor commands through. This also covers going back to stock
   from AButton. On 47U: the 8 s hold and the magenta LED work; flashing over the UART in
   this mode is **not yet tested** (next: the flasher with a wrong `--expect-serial` as a
   read-only check, then a real flash). Included in the prebuilt images.
 - **The prebuilt images only accept OTA images signed with the maintainer's key** (documented
-  prominently). Flash mode (0.2.1, untested over the UART) is meant to let owners switch to their own builds.
+  prominently). Flash mode (untested over the UART) is meant to let owners switch to their own builds.
 - BLE connection attempts from BlueZ often time out once; a retry usually works.
 - The P6 edge interrupt never fires (AButton polls the pin instead); why is unknown.
 - Rev-2 boards: different pins (button P16, battery ADC P1, stock table at `0x21b650`) and an

@@ -10,6 +10,7 @@ export const CONFIG = uuid("02");
 export const NAME = uuid("03");
 export const COMMAND = uuid("04");
 export const KEY = uuid("05");
+export const POWER = uuid("06");
 
 export const WRITE_SIZE = 20;
 export const MAX_STEPS = 40;
@@ -152,6 +153,26 @@ export function parseKey(text) {
 
 export const keyHex = (key) => Array.from(key, (b) => b.toString(16).padStart(2, "0")).join("");
 export const KEY_OFF = Uint8Array.of(0x00);
+
+// Power settings: { txPower: dBm or null (the radio's default, its maximum), sleep }
+export const TX_POWER_STEPS = [12, 8, 4, 0, -4, -8, -12, -16];
+const TX_POWER_DEFAULT = 0x7f;
+const POWER_VERSION = 1;
+
+export function encodePower({ txPower, sleep }) {
+  if (txPower !== null && !(Number.isInteger(txPower) && txPower >= -16 && txPower <= 12)) {
+    throw new RangeError("transmit power is -16 to 12 dBm, or the default");
+  }
+  return Uint8Array.of(POWER_VERSION, txPower === null ? TX_POWER_DEFAULT : txPower & 0xff, sleep ? 1 : 0, 0);
+}
+
+export function decodePower(data) {
+  const b = bytes(data);
+  if (b.length !== 4) throw new RangeError(`power settings are ${b.length} bytes, expected 4`);
+  if (b[0] !== POWER_VERSION) throw new RangeError(`power settings version ${b[0]}; this page knows ${POWER_VERSION}`);
+  const tx = b[1] > 127 ? b[1] - 256 : b[1];
+  return { txPower: b[1] === TX_POWER_DEFAULT ? null : tx, sleep: Boolean(b[2]) };
+}
 
 function bytes(data) {
   if (data instanceof DataView) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);

@@ -15,7 +15,7 @@ with no Echo, Alexa or pairing.
 > **Prebuilt images only take updates signed with the maintainer's key.** The images in
 > [`prebuilt/`](prebuilt/) have the repository maintainer's public key built in, so over the
 > air a button running them accepts **only** updates the maintainer signs (the
-> `.ota.signed` files published here). Firmware 0.2.1 and later (the prebuilt images) add a UART
+> `.ota.signed` files published here). The prebuilt images include a UART
 > **flash mode** (hold the button 8 s at power-up) meant to let owners with the test-pad
 > wiring flash their own builds onto a running AButton; it is experimental: the hold and the magenta LED work, flashing over the UART in this mode is not yet tested.
 
@@ -23,14 +23,18 @@ with no Echo, Alexa or pairing.
 
 ## What it does
 
-- **Never sleeps.** The stock firmware drops off after 10 idle minutes and loses the press
-  that wakes it. AButton keeps advertising and reports every press. This costs battery.
+- **Always on.** The stock firmware drops off after 10 idle minutes and loses the press
+  that wakes it. AButton keeps advertising and reports every press.
+- **Battery and radio options** (off by default): **light sleep** between events while
+  the LED is off (adverts, connections and presses keep working; a press is seen within about
+  50 ms), and a lower **transmit power** (−16 to +8 dBm, or the default maximum) for buttons
+  close to their receiver.
 - **BTHome v2** advertisements (service data UUID `0xFCD2`), which Home Assistant's BTHome
   integration decodes: `press`, `double_press`, `triple_press`, `long_press`,
   `long_double_press`, `long_triple_press`, and battery %. Fast advertising for 2.5 s after
   each event, then at the configured interval (250 ms by default). It keeps advertising
   (non-connectable) while a client is connected, so no press is missed.
-- **Encrypted BTHome** (0.3.0, optional): with a key set, the adverts are encrypted and
+- **Encrypted BTHome** (optional): with a key set, the adverts are encrypted and
   authenticated (AES-128-CCM, the BTHome bind key), so nobody nearby can read the presses or
   fake them. Home Assistant's BTHome integration asks for the key. Setting or changing the key
   only works within 60 s of a press on the button. The key is never readable over BLE.
@@ -48,7 +52,7 @@ with no Echo, Alexa or pairing.
   accepts images signed with the key its firmware was built with, so nobody nearby can
   reflash it: the maintainer's key for the prebuilt images, yours for your own build (see
   the note above).
-- **UART flash mode** (0.2.1, experimental: the hold and the magenta LED work, flashing over the UART in this mode is not yet tested): hold the button for 8 s right after
+- **UART flash mode** (experimental: the hold and the magenta LED work, flashing over the UART in this mode is not yet tested): hold the button for 8 s right after
   power-up; the LED turns magenta, Bluetooth stops until the next power cycle, and the
   chip should accept the UART flasher as under the stock firmware. Physical access only.
 - **One image for every unit:** the MAC stays in the unit's flash sector 0 and the name and
@@ -79,12 +83,15 @@ python3 firmware/abutton_ble.py name     $B "Garage Button"    # "" goes back to
 python3 firmware/abutton_ble.py identify $B                    # three white blinks
 python3 firmware/abutton_ble.py reboot   $B
 python3 firmware/abutton_ble.py defaults $B                    # settings, name and LED back to defaults
-# BTHome encryption (0.3.0+). Press the button once first: key changes need a press in the last 60 s.
+# BTHome encryption. Press the button once first: key changes need a press in the last 60 s.
 python3 firmware/abutton_ble.py key      $B --generate         # random key: stored, and printed for HA
 python3 firmware/abutton_ble.py key      $B 231d39c1d7cc1ab1aee224cd096db932   # your own key
 python3 firmware/abutton_ble.py key      $B off                # stop encrypting
 python3 firmware/abutton_ble.py key      $B                    # on or off?
 python3 firmware/abutton_ble.py monitor --key 231d39c1d7cc1ab1aee224cd096db932  # decrypt adverts
+# Battery and radio
+python3 firmware/abutton_ble.py power    $B --sleep on         # light sleep between events
+python3 firmware/abutton_ble.py power    $B --tx-power -8      # max, or 8 4 0 -4 -8 -12 -16 dBm
 ```
 
 `config` with no options prints the current settings. Each command connects, retries if
@@ -137,7 +144,7 @@ Needs Linux x86-64, Python 3 with `cryptography` (and `bleak` for the BLE tool).
    ```sh
    firmware/build.sh                  # release
    TRACE=1 firmware/build.sh          # with WICED traces on the HCI UART, 115200 baud
-   ABTN_FW_VERSION=0.3.0 firmware/build.sh
+   ABTN_FW_VERSION=0.4.0 firmware/build.sh
    ```
 
    The first build creates your **OTA signing key** at `~/.config/abutton/ota_key.pem`
@@ -188,7 +195,7 @@ python3 firmware/abutton_ble.py ota  AA:BB:CC:DD:EE:FF firmware/out/abutton.ota.
 ```
 
 Over the air is the normal way to update a running AButton. While its Bluetooth stack is
-up, the ROM refuses the UART flasher's commands (status `0x0C`); flash mode (0.2.1, untested over
+up, the ROM refuses the UART flasher's commands (status `0x0C`); flash mode (untested over
 the UART, see the guide) is meant for wired flashes. The prebuilt images accept only
 updates signed with the maintainer's key (published here); your own builds accept only yours. On BlueZ, if the button's MAC
 was once bonded with the stock firmware (a classic HID gamepad), `bluetoothctl remove` it
@@ -235,7 +242,7 @@ verifier's algorithm rebuilt with 32-bit words.
 | `build.sh`, `check.sh` | build, and the strict compile check |
 | `ota_sign.py` | key generation, the firmware's public-key source, signing, verification |
 | `abutton_image.py` | assemble full flash images, set name/MAC, show identity |
-| `abutton_ble.py` | BTHome monitor (decrypts with `--key`), info, LED, animations, settings, name, commands, encryption key, OTA client |
+| `abutton_ble.py` | BTHome monitor (decrypts with `--key`), info, LED, animations, settings, name, commands, encryption key, power, OTA client |
 | `../web/` | the Web Bluetooth setup page (`index.html`, protocol in `abutton.js`) |
 | `GUIDE.md` | wiring, flashing, setup, OTA and recovery, step by step |
 | `prebuilt/` | ready-made AButton images (release and debug, flash and OTA) and the stock firmware |

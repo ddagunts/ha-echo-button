@@ -112,3 +112,19 @@ def test_bthome_keys():
     with pytest.raises(ValueError):
         A.encryption_on(b"")
     assert A.KEY_OFF == b"\x00"
+
+
+def test_power_settings():
+    assert A.Power().encode() == bytes([1, 0x7F, 0, 0])                 # defaults: radio default, no sleep
+    assert A.Power(tx_power=-16, sleep=True).encode() == bytes([1, 0xF0, 1, 0])
+    assert A.Power(tx_power=12).encode() == bytes([1, 12, 0, 0])
+    for p in (A.Power(), A.Power(-8, True), A.Power(0)):
+        assert A.Power.decode(p.encode()) == p
+    for bad in (13, -17, 1.5):
+        with pytest.raises(ValueError):
+            A.Power(tx_power=bad)
+    with pytest.raises(ValueError, match="version"):
+        A.Power.decode(bytes([2, 0x7F, 0, 0]))
+    with pytest.raises(ValueError, match="bytes"):
+        A.Power.decode(bytes([1, 0x7F, 0]))
+

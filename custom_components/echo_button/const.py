@@ -30,3 +30,6 @@ CONF_LOW_BATTERY_WARNING = "low_battery_warning"
 CONF_BOOT_BATTERY = "boot_battery"
 CONF_RESTORE_LED = "restore_led"
 DEFAULT_ABUTTON_PRESS_COLOR = [255, 255, 255]
+CONF_TX_POWER = "tx_power"      # "max" (the radio's default) or a dBm step as a string
+CONF_SLEEP = "sleep"
+TX_POWER_MAX = "max"

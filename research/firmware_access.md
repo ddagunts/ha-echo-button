@@ -153,7 +153,7 @@ real command.
 | `0x00D00` | AButton identity record (optional name) | in sector 0 |
 | `0x01000` | fail-safe sector: OTA bank switch | erased = boot DS1; DS2 magic + address = boot DS2 |
 | `0x02000`–`0x03FFF` | VS: pairing / link keys | unit-unique, private |
-| `0x04000`–`0x41FFF` | DS1 `BRCMcfgD`: the firmware | stock ends at `0x1e4b4`; AButton 0.2.1 at `0x18c0c` (`0x19533` debug) |
+| `0x04000`–`0x41FFF` | DS1 `BRCMcfgD`: the firmware | stock ends at `0x1e4b4`; AButton 0.4.0 at `0x19515` (`0x19f0a` debug) |
 | `0x42000`–`0x7FFFF` | DS2: the OTA bank | erased on stock units |
 
 **Bank switching (SDK `fw_upgrade_lib`, verified with OTA):** after a verified download the
@@ -186,6 +186,38 @@ The button's stock patch is the same family as the SDK's but a different revisio
 SDK-built app can't be spliced onto the stock patch: AButton replaces the whole DS. The SDK's
 SS is byte-identical to the stock SS except the BD_ADDR. The SDK can't rebuild the stock app
 (no source); changes to it stay binary DS edits (`fw_mod.py`).
+
+## Transmit power and range (measured)
+
+**The button already advertises at its maximum power;** no firmware setting adds range.
+Measured 2026-11-19 on a rev-1 unit with a test build: RSSI 1 ft from a USB adapter,
+medians over 12 s, comparing the normal adverts with a second advert stream from the same
+button (the two interleave, so the room affects both alike).
+
+| Normal adverts set to (ROM `blecm_setTxPowerInADV`) | −16 | 0 | +4 | +8 | +12 | default |
+|---|---|---|---|---|---|---|
+| Received (dBm) | −65 | −44 | −40 | −34 | −33 | −33 to −38 |
+
+- **`blecm_setTxPowerInADV(int8 dBm)`** (ROM `0x146455`, not in the B0 headers) works, and
+  sets the power of **every** advert stream, multi-adv instances included. The default
+  matches the top of the range, and +8 and +12 come out within 1 dB of each other. It could
+  lower the power, not raise it.
+- **The multi-adv power parameter** (`wiced_set_multi_advertisement_params`, documented as
+  −21 to +9 dBm) has **no effect**: an instance set anywhere in that range came out within
+  3 dB of the normal adverts.
+- The ROM's dBm table (`lm_DualMode_TxPwrTable`, RAM `0x280550`, initial copy at ROM
+  `0x1c77a8`) has 8 nominal steps, +12 to −16 dBm in 4 dB steps, and clamps requests above
+  +12. Neither the stock firmware nor AButton changes it: their RF config records
+  (`0x0700`–`0x0704`) are byte-identical, the class 1.5 table (`0x0705`) is absent, and the
+  stock app sets no TX power.
+- The B0 SDK has no API for LE 2M, Long Range (coded PHY) or extended advertising.
+- **Trap:** the multi-adv wrappers (`wiced_set_multi_advertisement_*`,
+  `wiced_start_multi_advertisements`) send vendor command `0xFD54` with no callback, and so
+  return `BTM_SUCCESS` (0) on success, which reads as `FALSE` for their `wiced_bool_t` type.
+  Ignore the return value, as the SDK samples do.
+
+AButton 0.4.0 uses `blecm_setTxPowerInADV` for its transmit power option (lower only).
+For more range, put a Bluetooth proxy (an ESP32 with ESPHome) closer to the button.
 
 ## Erasing a sector from a LAUNCH_RAM stub (verified)
 

@@ -62,7 +62,9 @@
           "low_battery_pct": "Low battery below",
           "low_battery_warning": "Low battery warning",
           "boot_battery": "Show battery on power-up",
-          "restore_led": "Keep LED color across restarts"
+          "restore_led": "Keep LED color across restarts",
+          "tx_power": "Transmit power",
+          "sleep": "Light sleep"
         },
         "data_description": {
           "press_color": "Black turns the press light off.",
@@ -73,7 +75,9 @@
           "low_battery_pct": "The battery level that counts as low.",
           "low_battery_warning": "Two red blinks after each press while the battery is low.",
           "boot_battery": "The power-up blink is green, amber or red by battery level instead of white.",
-          "restore_led": "The button keeps the LED entity's color after a battery change or restart."
+          "restore_led": "The button keeps the LED entity's color after a battery change or restart.",
+          "tx_power": "Lower it only if the button is close to a Bluetooth adapter or proxy; −16 dBm arrives about 30 dB weaker than the maximum and shortens the range a lot.",
+          "sleep": "Lets the chip sleep between events while the LED is off, to save battery. Presses still register at once; a steady LED color keeps it awake."
         }
       }
     }

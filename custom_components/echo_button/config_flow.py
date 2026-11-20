@@ -22,6 +22,10 @@ from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
     NumberSelectorMode,
+    SelectOptionDict,
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
 )
 
 from . import abutton as A, bluez
@@ -41,6 +45,8 @@ from .const import (
     CONF_ON_COLOR,
     CONF_PRESS_COLOR,
     CONF_RESTORE_LED,
+    CONF_SLEEP,
+    CONF_TX_POWER,
     DEFAULT_ABUTTON_PRESS_COLOR,
     DEFAULT_FEEDBACK_MS,
     DEFAULT_KEEP_AWAKE,
@@ -50,6 +56,7 @@ from .const import (
     DEFAULT_PRESS_COLOR,
     DOMAIN,
     KIND_ABUTTON,
+    TX_POWER_MAX,
 )
 from .protocol import SLEEP_SECONDS
 
@@ -196,6 +203,10 @@ class EchoButtonOptionsFlow(OptionsFlow):
         return self.async_show_form(step_id="init", data_schema=schema)
 
 
+TX_POWER_OPTIONS = [SelectOptionDict(value=TX_POWER_MAX, label="Maximum (default)")] + [
+    SelectOptionDict(value=str(dbm), label=f"{dbm:+d} dBm" if dbm else "0 dBm") for dbm in A.TX_POWER_STEPS[1:]]
+
+
 class AButtonOptionsFlow(OptionsFlow):
     """Settings kept on an AButton: brightness, press color, click timing, adverts, battery."""
 
@@ -231,5 +242,8 @@ class AButtonOptionsFlow(OptionsFlow):
             vol.Required(CONF_LOW_BATTERY_WARNING, default=o.get(CONF_LOW_BATTERY_WARNING, True)): BooleanSelector(),
             vol.Required(CONF_BOOT_BATTERY, default=o.get(CONF_BOOT_BATTERY, True)): BooleanSelector(),
             vol.Required(CONF_RESTORE_LED, default=o.get(CONF_RESTORE_LED, True)): BooleanSelector(),
+            vol.Required(CONF_TX_POWER, default=o.get(CONF_TX_POWER, TX_POWER_MAX)): SelectSelector(
+                SelectSelectorConfig(options=TX_POWER_OPTIONS, mode=SelectSelectorMode.DROPDOWN)),
+            vol.Required(CONF_SLEEP, default=o.get(CONF_SLEEP, False)): BooleanSelector(),
         })
         return self.async_show_form(step_id="abutton", data_schema=schema)

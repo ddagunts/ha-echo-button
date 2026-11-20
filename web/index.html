@@ -123,6 +123,7 @@
   label.field > span { font-size: 13px; color: var(--muted); }
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px; }
   .checks { display: grid; gap: 8px; margin-top: 14px; }
+  .subhead { font-size: 14px; margin: 18px 0 10px; }
   .checks label { display: flex; gap: 10px; align-items: flex-start; }
   .checks input { margin-top: 3px; flex: none; }
   .device { display: flex; gap: 18px; align-items: center; }
@@ -198,7 +199,7 @@
   <section id="intro" class="card">
     <h2>Before you start</h2>
     <ol>
-      <li>The button runs <strong>AButton</strong> firmware (0.3.0 or newer for encryption).</li>
+      <li>The button runs <strong>AButton</strong> 0.4.0 or newer.</li>
       <li>It's switched on: press it once to wake it up.</li>
       <li>Nothing else is connected to it. The button takes one connection at a time, so Home Assistant
         can't change its light while this page is connected.</li>
@@ -224,9 +225,6 @@
 
     <section class="card" id="enc-card">
       <h2>BTHome encryption <span class="pill" id="enc-pill">…</span></h2>
-      <div id="enc-unsupported" hidden>
-        <p class="muted">This firmware can't encrypt. Update the button to AButton 0.3.0 or newer.</p>
-      </div>
       <div id="enc-body">
         <p>With encryption on, nobody nearby can read your presses or fake them. Home Assistant's BTHome
           integration then needs the button's key.</p>
@@ -323,6 +321,19 @@
           <label><input type="checkbox" name="bootBattery"> <span>The power-up blink shows the battery
             (green, amber or red) instead of white</span></label>
           <label><input type="checkbox" name="restoreLed"> <span>Keep the steady color across restarts</span></label>
+        </div>
+        <div id="power-settings">
+          <h3 class="subhead">Battery and radio</h3>
+          <div class="grid">
+            <label class="field"><span>Transmit power</span>
+              <select name="txPower"></select></label>
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" name="sleep"> <span>Light sleep between events, to save battery.
+              It sleeps only while the light is off, so a steady color keeps it awake.</span></label>
+          </div>
+          <p class="small muted" style="margin-top:8px">Lower power shortens the range; keep the maximum unless the
+            button is close to its receiver.</p>
         </div>
         <div class="row" style="margin-top:14px">
           <button class="primary" type="submit">Save settings</button>
@@ -449,7 +460,13 @@ async function open() {
   for (const [k, u] of [["led", A.LED], ["config", A.CONFIG], ["name", A.NAME], ["command", A.COMMAND]]) {
     ch[k] = await svc.getCharacteristic(u);
   }
-  ch.key = await svc.getCharacteristic(A.KEY).catch(() => null);
+  try {
+    ch.key = await svc.getCharacteristic(A.KEY);
+    ch.power = await svc.getCharacteristic(A.POWER);
+  } catch {
+    device.gatt.disconnect();
+    throw new Error("this button's firmware is too old: update it to AButton 0.4.0 or newer");
+  }
   let fw = "unknown";
   try {
     const dis = await server.getPrimaryService("device_information");
@@ -468,7 +485,8 @@ async function refresh() {
   $("name").value = $("dev-name").textContent;
   showLed(A.decodeLed(await read(ch.led)));
   fillSettings(A.decodeConfig(await read(ch.config)));
-  showEncryption(ch.key ? Boolean((await read(ch.key))[0]) : null);
+  await readPower();
+  showEncryption(Boolean((await read(ch.key))[0]));
 }
 
 function disconnected() {
@@ -551,18 +569,37 @@ function readSettings() {
   };
 }
 
+for (const v of [null, ...A.TX_POWER_STEPS.slice(1)]) {
+  form.elements.txPower.add(new Option(v === null ? "Maximum (default)" : `${v > 0 ? "+" : ""}${v} dBm`,
+    v === null ? "max" : String(v)));
+}
+
+async function readPower() {
+  const p = A.decodePower(await read(ch.power));
+  form.elements.txPower.value = p.txPower === null || p.txPower === 12 ? "max" : String(p.txPower);
+  form.elements.sleep.checked = p.sleep;
+}
+
+function readPowerForm() {
+  const v = form.elements.txPower.value;
+  return { txPower: v === "max" ? null : Number(v), sleep: form.elements.sleep.checked };
+}
+
 form.elements.brightness.addEventListener("input", (e) => ($("brightness-out").textContent = e.target.value));
 form.elements.pressNone.addEventListener("change", (e) => (form.elements.pressColor.disabled = e.target.checked));
 form.addEventListener("submit", (e) => {
   e.preventDefault();
   run("Saving settings", async () => {
     await write(ch.config, A.encodeConfig(readSettings()));
+    await write(ch.power, A.encodePower(readPowerForm()));
     fillSettings(A.decodeConfig(await read(ch.config)));
+    await readPower();
     return "Settings saved on the button.";
   });
 });
 $("settings-reload").addEventListener("click", () => run("Reading settings", async () => {
   fillSettings(A.decodeConfig(await read(ch.config)));
+  await readPower();
   return "Settings as stored on the button.";
 }));
 
@@ -594,10 +631,8 @@ document.querySelectorAll("[data-cmd]").forEach((b) => b.addEventListener("click
 
 // ---- encryption ----------------------------------------------------------------------
 function showEncryption(on) {
-  $("enc-unsupported").hidden = on !== null;
-  $("enc-body").hidden = on === null;
   const pill = $("enc-pill");
-  pill.textContent = on === null ? "not available" : on ? "On" : "Off";
+  pill.textContent = on ? "On" : "Off";
   pill.className = "pill " + (on ? "ok" : "warn");
   $("key-generate").textContent = on ? "Change the key" : "Turn on encryption";
   $("key-off").hidden = !on;

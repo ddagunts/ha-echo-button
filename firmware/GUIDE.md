@@ -8,7 +8,7 @@ that won't boot. It needs no build environment: ready-made images are in
 > **Two paths.** On its **stock** firmware the button works with this repository's Home
 > Assistant integration over Classic Bluetooth, with no soldering (see the main README).
 > **AButton** needs a one-time wired flash, then reports presses as BTHome over BLE (so
-> ESPHome Bluetooth proxies work), never sleeps, and updates over the air.
+> ESPHome Bluetooth proxies work), stays on, and updates over the air.
 
 > **No warranty.** Opening, wiring and reflashing a button is entirely at your own risk. The maintainer is not responsible for bricked, broken or unflashable buttons, or any other damage, however it happens.
 
@@ -21,7 +21,7 @@ windows are only for a button whose firmware is **bad**; a working button is eas
 |---|---|---|
 | **Stock firmware** (works normally) | the UART flasher, step 4 | press once; the stock firmware keeps the board on for 10 minutes, and the flash takes about 25 s |
 | **AButton** (works normally) | **over the air**, step 6 | no wires, no presses: about 100 s over Bluetooth |
-| **AButton**, with your own image or key | the UART flasher in **flash mode**, step 6b (0.2.1, experimental) | hold the button 8 s at power-up, then about 25 s |
+| **AButton**, with your own image or key | the UART flasher in **flash mode**, step 6b (experimental) | hold the button 8 s at power-up, then about 25 s |
 | **Bad firmware**: no LED, no adverts, dies about 2 s after every press | the UART flasher in press windows, step 7 | about 15 presses, each giving a 2 s window |
 
 "Bad" means the firmware doesn't start or doesn't hold the power on, for example after an
@@ -160,13 +160,13 @@ press once and retry.
 
 > **About the signing key.** The prebuilt image trusts only the repository maintainer's key:
 > over the air, the button accepts **only** updates the maintainer signs and publishes here.
-> The prebuilt images (0.2.1 and later) include a UART flash mode (step 6b) meant for flashing your
+> The prebuilt images include a UART flash mode (step 6b) meant for flashing your
 > own builds onto a running AButton later, but it's untested over the UART so far. To be
 > safe, [build from source](#building-your-own) now and flash your own image here if you
 > want your own key.
 
 ```sh
-python3 research/echobtn_resume_flash.py firmware/prebuilt/abutton-0.3.0.bin \
+python3 research/echobtn_resume_flash.py firmware/prebuilt/abutton-0.4.0.bin \
     --sectors 0x1000,0x4000-0x1e000 --expect-serial <your serial>
 ```
 
@@ -188,7 +188,7 @@ Then take the batteries out for a few seconds, put them back, and **press once**
 blinks green (amber or red if the batteries are low), then stays dark; it lights white while
 the button is held.
 
-**Debug build:** `abutton-0.3.0-dbg.bin` prints a heartbeat, button and battery traces on the
+**Debug build:** `abutton-0.4.0-dbg.bin` prints a heartbeat, button and battery traces on the
 UART (read them with `echobtn_trace.py`). Use it for bring-up; keep the trace reader running
 while it's in use.
 
@@ -207,11 +207,11 @@ Home Assistant picks the button up twice, through the host's Bluetooth adapter o
 ESPHome Bluetooth proxy in range (Settings → Devices & services → Discovered):
 
 - **BTHome** (built in): the button event entity and the battery sensor.
-- **Amazon Echo Button** (this repository's integration, 0.2.0+): the **LED** as a `light`
+- **Amazon Echo Button** (this repository's integration): the **LED** as a `light`
   entity, `echo_button.play_animation` (with `repeat: 0` to loop until the light is changed),
   an **Identify** button, and the button's settings under **Configure** (LED brightness, color
   while held, click timing, advert interval, low-battery level and warning, battery color on
-  power-up, keep the LED color across restarts). It finds AButtons by the service UUID in
+  power-up, keep the LED color across restarts, transmit power, light sleep). It finds AButtons by the service UUID in
   their scan response, so a proxy has to be in **active** mode, and connects only to send
   changes.
 
@@ -260,7 +260,7 @@ over Web Bluetooth. Serve it over HTTPS (the repository's GitHub Pages) or local
 A unit that was paired with the stock firmware's Classic Bluetooth integration can be removed
 from it; AButton doesn't use Classic Bluetooth.
 
-### Encrypt the presses (0.3.0+)
+### Encrypt the presses
 
 BTHome adverts are plain by default: anyone nearby can see the presses, and could send fake
 ones to trigger your automations. To encrypt them:
@@ -276,6 +276,18 @@ A new key works the same way. To go back to plain adverts, press the button, tur
 (two amber blinks), then delete the button's BTHome device in Home Assistant and add it again:
 BTHome ignores unencrypted adverts from a device it has a key for.
 
+### Save battery
+
+Two options, both off by default, in Home Assistant (the AButton's **Configure**), on the web page (Settings → Battery and radio), or with
+`python3 firmware/abutton_ble.py power AA:BB:CC:DD:EE:FF --sleep on --tx-power -8`. With the
+integration in use, set them there: it sends its options each time it connects.
+
+- **Light sleep:** the chip sleeps between events while the LED is off. Presses, adverts and
+  connections work as before; a press registers within about 50 ms. A steady LED color keeps
+  it awake.
+- **Transmit power:** lower it only if the button is close to its receiver; −16 dBm arrives
+  about 30 dB weaker than the default maximum, which shortens the range a lot.
+
 ## 6. Update over the air
 
 Once a button runs AButton, **every update goes this way**: no wires, no presses, nothing
@@ -283,7 +295,7 @@ opened. The serial lead is only needed again if a button ends up with bad firmwa
 
 ```sh
 python3 firmware/abutton_ble.py info AA:BB:CC:DD:EE:FF                 # firmware version
-python3 firmware/abutton_ble.py ota  AA:BB:CC:DD:EE:FF firmware/prebuilt/abutton-0.3.0.ota.signed
+python3 firmware/abutton_ble.py ota  AA:BB:CC:DD:EE:FF firmware/prebuilt/abutton-0.4.0.ota.signed
 ```
 
 - About 100 s for 80 KB (0.8 KiB/s). The LED is dim blue during the transfer. The button
@@ -298,9 +310,9 @@ python3 firmware/abutton_ble.py ota  AA:BB:CC:DD:EE:FF firmware/prebuilt/abutton
   device from the stock firmware: `bluetoothctl remove AA:BB:CC:DD:EE:FF`, then retry.
   A plain `error:` is usually a connection timeout; retry once.
 
-## 6b. Wired flash of a running AButton: flash mode (0.2.1, experimental)
+## 6b. Wired flash of a running AButton: flash mode (experimental)
 
-> **Status:** in firmware 0.2.1 (the prebuilt images). Verified: the 8 s hold and the
+> **Status:** in the prebuilt images. Verified: the 8 s hold and the
 > magenta LED. **Not yet tested:** flashing over the UART in this mode. Expect to fall back
 > to step 7 if it doesn't work.
 
@@ -336,7 +348,7 @@ Press when it says `Press the button`, release when it reports the window closed
 about 15 presses for 27 sectors (1–2 sectors fit in each 2 s window). Progress survives between presses. Then take the batteries
 out for a few seconds and press.
 
-IMAGE is `firmware/prebuilt/abutton-0.3.0.bin` (or your own build) for AButton, or your own
+IMAGE is `firmware/prebuilt/abutton-0.4.0.bin` (or your own build) for AButton, or your own
 dump (`dump/sflash.bin`) for stock.
 
 If the flasher says the firmware refuses vendor commands (`0x0C`), the unit runs a working
@@ -346,7 +358,7 @@ works needs the untried TMF8 trick (step 1).
 ## 8. Back to stock
 
 Flash your own dump (`dump/sflash.bin`, step 3) with `--sectors 0x1000,0x4000-0x1e000`:
-- on a unit running **AButton 0.2.1**: in flash mode, as in step 6b (experimental);
+- on a unit running **AButton**: in flash mode, as in step 6b (experimental);
 - on a unit stuck in the ROM handler: in press windows, as in step 7.
 
 Without a dump: a stock firmware image of a rev-1 unit (the firmware sectors only, no unit
@@ -366,7 +378,7 @@ After restoring stock, pair it with the Home Assistant integration as in the mai
 | Unit dies 2 s after each press | the firmware doesn't start or doesn't latch P5: recovery (step 7) |
 | Battery % doesn't change | it's only measured while the LED is dark; a constantly lit LED freezes it |
 | No "Amazon Echo Button" discovery for an AButton | the proxy must be in active mode (scan responses) |
-| `br-connection-create-socket` (CLI or Home Assistant) | BlueZ still has the stock firmware's Classic pairing for the button. The integration (0.2.1+) removes it by itself; on the command line, `bluetoothctl remove <MAC>` |
+| `br-connection-create-socket` (CLI or Home Assistant) | BlueZ still has the stock firmware's Classic pairing for the button. The integration removes it by itself; on the command line, `bluetoothctl remove <MAC>` |
 
 ## Building your own
 
