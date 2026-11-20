@@ -33,3 +33,4 @@ def test_example_is_a_valid_animation(name, data):
     writes = A.led_animation(steps, data.get("repeat", 1))        # raises on any limit
     assert all(len(w) <= A.DEFAULT_WRITE_SIZE for w in writes)
     assert len(steps) <= STOCK_MAX_STEPS
+

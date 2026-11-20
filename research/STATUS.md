@@ -23,9 +23,11 @@ Where the firmware work stands (November 2026). The how-to is
 | BTHome adverts continue while a client is connected (non-connectable) | verified (21 adverts in 10 s while connected) |
 | Home Assistant: discovery, LED light, play_animation, identify, options | verified on a live Home Assistant (integration 0.2.1), plus `tests_ha/` |
 | A stock button switched to AButton: its old Classic pairing in the HA host's BlueZ | removed automatically by integration 0.2.1 (caused `br-connection-create-socket`) |
+| BTHome encryption (0.3.0): AES-128-CCM adverts, key set over GATT after a press | verified on a rev-1 unit (2026-11-19): key taken after a press, refused 60 s later; adverts decrypt with the scanned address; counter 256 after a reboot; key kept. Encoder host-tested against bthome-ble. Home Assistant's BTHome integration took the key and decodes the presses |
 
-Current build: **0.2.1** (`firmware/prebuilt/`): the release build runs on both test units
-(installed over the air). 0.2.1 = 0.2.0 plus the experimental UART flash mode.
+Current build: **0.3.0** (`firmware/prebuilt/`): the release build runs on both test units
+(installed over the air). 0.2.1 = 0.2.0 plus the experimental UART flash mode; 0.3.0 adds
+BTHome encryption.
 
 ## Open
 

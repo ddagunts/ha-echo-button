@@ -2,6 +2,7 @@
 """Talk to AButton firmware over BLE: adverts, info, LED, settings, name, commands, OTA.
 
   python3 firmware/abutton_ble.py monitor                    # decode BTHome adverts live
+  python3 firmware/abutton_ble.py monitor --key KEY          # ...and decrypt encrypted ones
   python3 firmware/abutton_ble.py info     AA:BB:CC:DD:EE:FF # firmware, name, settings, LED
   python3 firmware/abutton_ble.py color    AA:BB:CC:DD:EE:FF ff8800      # steady color; "off"
   python3 firmware/abutton_ble.py animate  AA:BB:CC:DD:EE:FF ff0000:300 000000:300 --repeat 0
@@ -11,11 +12,18 @@
   python3 firmware/abutton_ble.py identify AA:BB:CC:DD:EE:FF            # blink white 3 times
   python3 firmware/abutton_ble.py reboot   AA:BB:CC:DD:EE:FF
   python3 firmware/abutton_ble.py defaults AA:BB:CC:DD:EE:FF            # restore all settings
+  python3 firmware/abutton_ble.py key      AA:BB:CC:DD:EE:FF --generate # encrypt BTHome (0.3.0+)
+  python3 firmware/abutton_ble.py key      AA:BB:CC:DD:EE:FF off        # stop encrypting
   python3 firmware/abutton_ble.py ota      AA:BB:CC:DD:EE:FF firmware/prebuilt/abutton-X.ota.signed
 
 Animation steps are COLOR:MS or COLOR:MS:fade (fade from the previous color); --repeat 0
 loops until stopped or replaced. Settings (config) are kept on the button; see
 `config --help`. The protocol is in custom_components/echo_button/abutton.py.
+
+BTHome encryption: `key --generate` makes a random key, stores it on the button and prints
+it; give it to Home Assistant's BTHome integration (it asks for it once the adverts are
+encrypted). `key ADDR 32-HEX-CHARS` uses your own key. Changing or removing the key only
+works within 60 s of a press on the button, so press it once first.
 
 OTA uses the WICED secure upgrade service (fw_upgrade_lib): enable control-point
 notifications, PREPARE (1), DOWNLOAD (2, u32 length), write the signed image to the data
@@ -33,6 +41,8 @@ from pathlib import Path
 
 from bleak import BleakClient, BleakScanner
 from bleak.exc import BleakError
+from cryptography.exceptions import InvalidTag
+from cryptography.hazmat.primitives.ciphers.aead import AESCCM
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "custom_components" / "echo_button"))
 import abutton as A  # the shared, Home Assistant-free protocol module
@@ -53,11 +63,35 @@ BUTTON_EVENTS = {0: "none", 1: "press", 2: "double_press", 3: "triple_press", 4:
                  5: "long_double_press", 6: "long_triple_press", 0x80: "hold_press"}
 
 
-def parse_bthome(data: bytes) -> dict | None:
-    """Decode the BTHome v2 objects this firmware sends (packet id, battery, button)."""
-    if not data or data[0] & 0xE0 != 0x40 or data[0] & 0x01:
-        return None                       # not v2, or encrypted
-    out, p = {}, 1
+def decrypt_bthome(data: bytes, address: str, key: bytes) -> tuple[bytes, int] | None:
+    """Encrypted BTHome v2 service data (after the UUID) -> (objects, counter), as bthome-ble
+    does it: AES-CCM, 4-byte MIC, nonce = address + UUID d2 fc + device info + counter."""
+    if len(data) < 1 + 8 or not data[0] & 0x01:
+        return None
+    counter = data[-8:-4]
+    nonce = bytes.fromhex(address.replace(":", "")) + b"\xd2\xfc" + data[:1] + counter
+    try:
+        objs = AESCCM(key, tag_length=4).decrypt(nonce, data[1:-8] + data[-4:], None)
+    except InvalidTag:
+        return None
+    return objs, int.from_bytes(counter, "little")
+
+
+def parse_bthome(data: bytes, address: str | None = None, key: bytes | None = None) -> dict | None:
+    """Decode the BTHome v2 objects this firmware sends (packet id, battery, button).
+    Encrypted adverts are decrypted with key (and the advertiser's address)."""
+    if not data or data[0] & 0xE0 != 0x40:
+        return None                       # not v2
+    out: dict = {}
+    if data[0] & 0x01:
+        if key is None or address is None:
+            return {"encrypted": "no key"}
+        plain = decrypt_bthome(data, address, key)
+        if plain is None:
+            return {"encrypted": "wrong key"}
+        objs, out["counter"] = plain
+        data = data[:1] + objs
+    p = 1
     sizes = {0x00: 1, 0x01: 1, 0x3A: 1}
     while p < len(data):
         oid = data[p]
@@ -74,17 +108,18 @@ def parse_bthome(data: bytes) -> dict | None:
     return out
 
 
-async def monitor(seconds: float | None) -> None:
-    last: dict[str, int] = {}
+async def monitor(seconds: float | None, key: bytes | None) -> None:
+    last: dict[str, object] = {}
 
     def seen(dev, adv):
         sd = adv.service_data.get(BTHOME_UUID)
         if sd is None:
             return
-        obj = parse_bthome(sd)
-        if obj is None or last.get(dev.address) == obj.get("packet_id"):
+        obj = parse_bthome(sd, dev.address, key)
+        seen_id = obj.get("packet_id", sd) if obj else None
+        if obj is None or last.get(dev.address) == seen_id:
             return
-        last[dev.address] = obj.get("packet_id")
+        last[dev.address] = seen_id
         ts = time.strftime("%H:%M:%S")
         print(f"{ts} {dev.address} {adv.local_name or '?':16s} rssi {adv.rssi:4d}  {obj}", flush=True)
 
@@ -130,6 +165,11 @@ async def info(address: str) -> None:
         print(f"{'name':13s} {(await c.read_gatt_char(A.NAME_UUID)).decode(errors='replace')}")
         led = A.LedState.decode(bytes(await c.read_gatt_char(A.LED_UUID)))
         print(f"{'led':13s} {bytes(led.color).hex()}{' (animating)' if led.animating else ''}")
+        if c.services.get_characteristic(A.KEY_UUID):
+            on = A.encryption_on(bytes(await c.read_gatt_char(A.KEY_UUID)))
+            print(f"{'encryption':13s} {'on (BTHome key set)' if on else 'off'}")
+        else:
+            print(f"{'encryption':13s} not supported (firmware older than 0.3.0)")
         print_config(A.Config.decode(bytes(await c.read_gatt_char(A.CONFIG_UUID))))
     finally:
         await c.disconnect()
@@ -179,6 +219,43 @@ async def configure(address: str, args: argparse.Namespace) -> None:
             new = A.Config.decode(bytes(await c.read_gatt_char(A.CONFIG_UUID)))
             print("saved on the button:")
         print_config(new)
+    finally:
+        await c.disconnect()
+
+
+async def set_key(address: str, key: bytes | None) -> None:
+    """Store a BTHome key on the button (None = stop encrypting)."""
+    c = await connect(address)
+    try:
+        need_abutton(c)
+        if not c.services.get_characteristic(A.KEY_UUID):
+            raise RuntimeError("this firmware has no BTHome encryption (older than 0.3.0)")
+        try:
+            await c.write_gatt_char(A.KEY_UUID, key or A.KEY_OFF, response=True)
+        except BleakError as err:
+            if "authoriz" in str(err).lower():
+                raise RuntimeError(f"the button refused: {A.PRESS_HINT}") from err
+            raise
+        if A.encryption_on(bytes(await c.read_gatt_char(A.KEY_UUID))) != bool(key):
+            raise RuntimeError("the button did not take the change")
+    finally:
+        await c.disconnect()
+    if key:
+        print("BTHome encryption is on. The key (enter it in Home Assistant's BTHome integration):")
+        print(key.hex())
+    else:
+        print("BTHome encryption is off")
+
+
+async def key_status(address: str) -> None:
+    c = await connect(address)
+    try:
+        need_abutton(c)
+        if not c.services.get_characteristic(A.KEY_UUID):
+            print("no BTHome encryption in this firmware (older than 0.3.0)")
+            return
+        on = A.encryption_on(bytes(await c.read_gatt_char(A.KEY_UUID)))
+        print(f"BTHome encryption is {'on' if on else 'off'}")
     finally:
         await c.disconnect()
 
@@ -237,6 +314,7 @@ def main() -> None:
     sub = ap.add_subparsers(dest="cmd", required=True)
     m = sub.add_parser("monitor", help="decode BTHome adverts")
     m.add_argument("--seconds", type=float)
+    m.add_argument("--key", type=A.parse_key, help="BTHome key (32 hex characters) to decrypt adverts")
     for name, help_ in (("info", "firmware, name, settings and LED"), ("stop", "stop the animation"),
                         ("identify", "blink white 3 times"), ("reboot", "restart the button"),
                         ("defaults", "restore default settings, name and LED")):
@@ -263,6 +341,10 @@ def main() -> None:
                         ("--boot-battery", "boot blink shows the battery (green/amber/red) instead of white"),
                         ("--restore-led", "keep the steady color across reboots")):
         cf.add_argument(flag, choices=("on", "off"), help=help_)
+    k = sub.add_parser("key", help="BTHome encryption: show, set, generate or turn off (press the button first)")
+    k.add_argument("address")
+    k.add_argument("key", nargs="?", help="32 hex characters, or off; omit to show the state")
+    k.add_argument("--generate", action="store_true", help="make a random key, store it and print it")
     o = sub.add_parser("ota", help="install a signed firmware image")
     o.add_argument("address")
     o.add_argument("image")
@@ -270,7 +352,16 @@ def main() -> None:
 
     try:
         if args.cmd == "monitor":
-            job = monitor(args.seconds)
+            job = monitor(args.seconds, args.key)
+        elif args.cmd == "key":
+            if args.generate and args.key:
+                ap.error("give a key or --generate, not both")
+            if args.generate:
+                job = set_key(args.address, A.generate_key())
+            elif args.key is None:
+                job = key_status(args.address)
+            else:
+                job = set_key(args.address, None if args.key.lower() == "off" else A.parse_key(args.key))
         elif args.cmd == "info":
             job = info(args.address)
         elif args.cmd == "color":

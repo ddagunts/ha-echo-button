@@ -12,10 +12,14 @@ Service 0e5a1000-a8b9-4c3b-9d1a-ab7ff0ab7700:
   Config   13 bytes, see Config
   Name     0..26 printable ASCII; empty = the default name
   Command  01 reboot | 02 restore defaults | 03 identify
+  Key      read <BTHome encryption on>; write a 16-byte key (encrypt) or 00 (stop). Only
+           within 60 s of a press on the button, else ATT error 0x08. Never readable.
+           (0.3.0+)
 """
 
 from __future__ import annotations
 
+import secrets
 import struct
 from dataclasses import dataclass, field, replace
 
@@ -26,6 +30,7 @@ LED_UUID = "0e5a1001-a8b9-4c3b-9d1a-ab7ff0ab7700"
 CONFIG_UUID = "0e5a1002-a8b9-4c3b-9d1a-ab7ff0ab7700"
 NAME_UUID = "0e5a1003-a8b9-4c3b-9d1a-ab7ff0ab7700"
 COMMAND_UUID = "0e5a1004-a8b9-4c3b-9d1a-ab7ff0ab7700"
+KEY_UUID = "0e5a1005-a8b9-4c3b-9d1a-ab7ff0ab7700"
 FIRMWARE_REVISION_UUID = "00002a26-0000-1000-8000-00805f9b34fb"
 
 DEFAULT_WRITE_SIZE = 20  # ATT MTU 23 - 3
@@ -47,6 +52,11 @@ FLAG_LOW_BATTERY_WARNING = 0x01  # two red blinks after a press when the battery
 FLAG_BOOT_BATTERY = 0x02         # the boot blink shows the battery: green / amber / red
 FLAG_RESTORE_LED = 0x04          # the steady LED color survives a reboot
 FLAGS_ALL = FLAG_LOW_BATTERY_WARNING | FLAG_BOOT_BATTERY | FLAG_RESTORE_LED
+
+KEY_LEN = 16
+KEY_OFF = b"\x00"
+ATT_INSUFFICIENT_AUTHORIZATION = 0x08  # a key write without a recent press on the button
+PRESS_HINT = "press the button once, then try again within 60 seconds"
 
 CONFIG_VERSION = 1
 _CONFIG = struct.Struct("<BBB3sHHHB")
@@ -164,6 +174,31 @@ def check_name(name: str) -> bytes:
     if raw is None or len(raw) > NAME_MAX or not all(0x20 <= b <= 0x7E for b in raw):
         raise ValueError(f"a name is 0-{NAME_MAX} printable ASCII characters")
     return raw
+
+
+def generate_key() -> bytes:
+    """A new random BTHome encryption key."""
+    return secrets.token_bytes(KEY_LEN)
+
+
+def parse_key(text: str) -> bytes:
+    """A BTHome key as Home Assistant shows it: 32 hex characters."""
+    try:
+        key = bytes.fromhex(text.strip())
+    except ValueError:
+        key = b""
+    if len(key) != KEY_LEN:
+        raise ValueError(f"a BTHome key is {2 * KEY_LEN} hex characters")
+    if key == bytes(KEY_LEN):
+        raise ValueError("the all-zero key is not allowed")
+    return key
+
+
+def encryption_on(data: bytes) -> bool:
+    """Decode a read of the key characteristic."""
+    if len(data) != 1:
+        raise ValueError(f"key state is {len(data)} bytes, expected 1")
+    return bool(data[0])
 
 
 def parse_hex_color(text: str) -> Color:

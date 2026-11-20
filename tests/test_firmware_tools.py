@@ -165,5 +165,5 @@ def test_parse_bthome():
     assert ble.parse_bthome(bytes.fromhex("40 00 07 01 55 3a 02")) == \
         {"packet_id": 7, "battery": 0x55, "button": "double_press"}
     assert ble.parse_bthome(bytes.fromhex("40 00 08 01 64")) == {"packet_id": 8, "battery": 100}
-    assert ble.parse_bthome(bytes.fromhex("41 00 01")) is None      # encrypted
+    assert ble.parse_bthome(bytes.fromhex("41 00 01")) == {"encrypted": "no key"}
     assert ble.parse_bthome(bytes.fromhex("20 00 01")) is None      # BTHome v1

@@ -8,6 +8,7 @@ NAME := abutton
 
 APP_SRC  = abutton.c
 APP_SRC += wiced_bt_cfg.c
+APP_SRC += bthome.c
 APP_SRC += ecdsa256_pub.c
 
 $(NAME)_COMPONENTS := fw_upgrade_lib.a

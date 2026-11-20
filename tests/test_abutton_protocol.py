@@ -98,3 +98,17 @@ def test_classic_records_finds_only_stale_classic_entries():
         ("/org/bluez/hci1", "/org/bluez/hci1/dev_00_11_22_33_44_55"),
     ]
     assert classic_records(objects, "00:11:22:33:44:77") == []
+
+
+def test_bthome_keys():
+    key = A.generate_key()
+    assert len(key) == 16 and A.generate_key() != key
+    assert A.parse_key(key.hex().upper()) == key
+    assert A.parse_key(" 231d39c1d7cc1ab1aee224cd096db932\n") == bytes.fromhex("231d39c1d7cc1ab1aee224cd096db932")
+    for bad in ("", "abc", "00" * 15, "00" * 17, "zz" * 16, "00" * 16):
+        with pytest.raises(ValueError):
+            A.parse_key(bad)
+    assert A.encryption_on(b"\x01") and not A.encryption_on(b"\x00")
+    with pytest.raises(ValueError):
+        A.encryption_on(b"")
+    assert A.KEY_OFF == b"\x00"

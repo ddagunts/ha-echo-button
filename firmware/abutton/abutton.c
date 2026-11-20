@@ -5,7 +5,8 @@
  *     idle shutdown, so the button is always advertising and every press counts.
  *   - BTHome v2 over BLE advertisements (service data UUID 0xFCD2), which ESPHome
  *     Bluetooth proxies relay to Home Assistant: button events (press, double, triple,
- *     long, long-double, long-triple) and battery %.
+ *     long, long-double, long-triple) and battery %. Optionally encrypted (AES-CCM, the
+ *     BTHome bind key), so nobody nearby can read or fake the presses.
  *   - The AButton GATT service (see "GATT protocol" below): the LED (a steady color and
  *     animations), settings kept in NVRAM, the name, and commands.
  *   - Status on the LED: battery color at boot, a low-battery warning after presses, OTA
@@ -37,6 +38,16 @@
  *   Config  0e5a1002  read/write the 13-byte abtn_config_t below (version 1)
  *   Name    0e5a1003  read/write 0..26 printable ASCII; empty = the default name
  *   Command 0e5a1004  write 01 reboot, 02 restore defaults (settings, name, LED), 03 identify
+ *   Key     0e5a1005  read: <BTHome encryption on 0/1> (the key itself is never readable)
+ *                     write <16-byte key>           encrypt BTHome adverts with this key
+ *                     write 00                      stop encrypting
+ *                     Only within KEY_PRESENCE_S of a button press (else Insufficient
+ *                     Authorization, 0x08), so changing the key needs someone at the button.
+ *                     Restore defaults keeps the key.
+ *
+ * BTHome encryption: AES-128-CCM as Home Assistant's BTHome integration expects (bthome.c).
+ * The counter in each advert keeps rising across reboots (reserved in NVRAM in blocks), so
+ * no nonce repeats and Home Assistant's replay check keeps accepting the adverts.
  *
  * LED priority: OTA status > press light (while held) > status blinks > animation > steady.
  */
@@ -65,6 +76,7 @@
 #include "bt_types.h"
 #include "p_256_multprecision.h"
 #include "p_256_ecc_pp.h"
+#include "bthome.h"
 
 #ifndef ABTN_FW_VERSION
 #define ABTN_FW_VERSION         "0.1.0"
@@ -92,6 +104,7 @@ static const uint16_t led_gain[3] = { 1000, 407, 600 };
 #define IDENTITY_NAME_MAX       26
 #define FACTORY_SERIAL_ADDR     0xC00               /* stock: 16-char serial */
 #define NAME_ADV_MAX            15                  /* fits next to the BTHome data */
+#define NAME_ADV_MAX_ENC        7                   /* ...when it is encrypted (8 bytes longer) */
 #define NAME_RSP_MAX            11                  /* fits next to the 128-bit service UUID */
 
 typedef struct
@@ -127,11 +140,15 @@ typedef struct
 typedef struct { uint8_t magic[2]; abtn_config_t cfg; } nv_config_t;
 typedef struct { uint8_t magic[2]; uint8_t len; char name[IDENTITY_NAME_MAX]; } nv_name_t;
 typedef struct { uint8_t magic[2]; uint8_t rgb[3]; } nv_led_t;
+typedef struct { uint8_t magic[2]; uint8_t on; uint8_t key[BTHOME_KEY_LEN]; } nv_key_t;
+typedef struct { uint8_t magic[2]; uint32_t next; } nv_counter_t;   /* first counter not yet used */
 #pragma pack()
 
 #define NV_CONFIG               (WICED_NVRAM_VSID_START + 0)
 #define NV_NAME                 (WICED_NVRAM_VSID_START + 1)
 #define NV_LED                  (WICED_NVRAM_VSID_START + 2)
+#define NV_KEY                  (WICED_NVRAM_VSID_START + 3)
+#define NV_COUNTER              (WICED_NVRAM_VSID_START + 4)
 
 static const abtn_config_t cfg_default =
 {
@@ -146,6 +163,8 @@ static const abtn_config_t cfg_default =
 #define ANIM_MAX_STEPS          40
 #define LED_SAVE_DELAY_S        5                   /* store the steady color this long after the last change */
 #define FLASH_MODE_HOLD_MS      8000                /* hold at power-up to enter UART flash mode */
+#define KEY_PRESENCE_S          60                  /* key writes allowed this long after a press */
+#define COUNTER_BLOCK           256                 /* encryption counters reserved per NVRAM write */
 #ifdef WICED_BT_TRACE_ENABLE
 #define BATTERY_PERIOD_S        5                   /* bring-up: trace the raw readings often */
 #else
@@ -189,6 +208,8 @@ enum
     HDL_ABTN_NAME_VAL,
     HDL_ABTN_CMD,
     HDL_ABTN_CMD_VAL,
+    HDL_ABTN_KEY,
+    HDL_ABTN_KEY_VAL,
 };
 
 #define RW_PROPS                (LEGATTDB_CHAR_PROP_READ | LEGATTDB_CHAR_PROP_WRITE)
@@ -225,6 +246,8 @@ const uint8_t abtn_gatt_db[] =
             RW_PROPS, RW_PERMS),
         CHARACTERISTIC_UUID128_WRITABLE(HDL_ABTN_CMD, HDL_ABTN_CMD_VAL, ABTN_UUID(0x04),
             LEGATTDB_CHAR_PROP_WRITE, LEGATTDB_PERM_WRITE_REQ | LEGATTDB_PERM_VARIABLE_LENGTH),
+        CHARACTERISTIC_UUID128_WRITABLE(HDL_ABTN_KEY, HDL_ABTN_KEY_VAL, ABTN_UUID(0x05),
+            RW_PROPS, RW_PERMS),
 
     /* WICED secure OTA firmware upgrade service (handles 0xff00..; handled by fw_upgrade_lib) */
     PRIMARY_SERVICE_UUID128(HANDLE_OTA_FW_UPGRADE_SERVICE, UUID_OTA_SEC_FW_UPGRADE_SERVICE),
@@ -262,6 +285,14 @@ static uint8_t        clicks;
 static wiced_timer_t  poll_timer, long_timer, click_timer, burst_timer, battery_timer;
 static wiced_timer_t  led_timer, led_save_timer, reboot_timer, flash_mode_timer;
 static wiced_bool_t   flash_mode;                   /* UART flash mode: BLE off, HCI open */
+
+static uint8_t        local_addr[6];                /* our BD_ADDR, most significant byte first */
+static wiced_bool_t   bthome_encrypt;
+static uint8_t        bthome_key[BTHOME_KEY_LEN];
+static uint32_t       bthome_counter;               /* next counter to use */
+static uint32_t       bthome_reserved;              /* counters below this are reserved in NVRAM */
+static wiced_bool_t   presence;                     /* the button was pressed in the last KEY_PRESENCE_S */
+static wiced_timer_t  presence_timer;
 
 /* ROM (B0): the embedded host stack's HCI event hook. While it is set, the ROM's
  * mpaf_df_hci_cmd_filter (0x745bc) answers every vendor HCI command from the UART that
@@ -539,6 +570,14 @@ static void status_identify(void)
     status_play(p, 6);
 }
 
+/* The BTHome key changed: two green blinks (encrypting) or two amber blinks (stopped). */
+static void status_key(wiced_bool_t on)
+{
+    static const uint8_t green[] = { 15, 0, 255, 0,  15, 0, 0, 0,  15, 0, 255, 0,  15, 0, 0, 0 };
+    static const uint8_t amber[] = { 15, 255, 120, 0,  15, 0, 0, 0,  15, 255, 120, 0,  15, 0, 0, 0 };
+    status_play(on ? green : amber, 4);
+}
+
 static void led_save(uint32_t arg)
 {
     nv_led_t       nv = { { 'A', 'L' }, { base_rgb[0], base_rgb[1], base_rgb[2] } };
@@ -605,6 +644,89 @@ static void battery_timeout(uint32_t arg)
     adv_update(0);
 }
 
+/* ---- BTHome encryption ---------------------------------------------------------- */
+static void presence_timeout(uint32_t arg)
+{
+    presence = WICED_FALSE;
+}
+
+/* A press: someone is at the button, so the key may change for the next KEY_PRESENCE_S. */
+static void presence_mark(void)
+{
+    presence = WICED_TRUE;
+    wiced_stop_timer(&presence_timer);
+    wiced_start_timer(&presence_timer, KEY_PRESENCE_S);
+}
+
+static void key_load(void)
+{
+    nv_key_t       nv;
+    nv_counter_t   ctr;
+    wiced_result_t st;
+    if (wiced_hal_read_nvram(NV_KEY, sizeof(nv), (uint8_t *)&nv, &st) == sizeof(nv) && st == WICED_SUCCESS &&
+        nv.magic[0] == 'A' && nv.magic[1] == 'K' && nv.on == 1)
+    {
+        memcpy(bthome_key, nv.key, BTHOME_KEY_LEN);
+        bthome_encrypt = WICED_TRUE;
+    }
+    memset(&nv, 0, sizeof(nv));
+    if (wiced_hal_read_nvram(NV_COUNTER, sizeof(ctr), (uint8_t *)&ctr, &st) == sizeof(ctr) && st == WICED_SUCCESS &&
+        ctr.magic[0] == 'A' && ctr.magic[1] == 'T')
+        bthome_counter = ctr.next;
+    bthome_reserved = bthome_counter;             /* nothing reserved yet in this boot */
+}
+
+/* The counter for the next encrypted advert. Counters are reserved in NVRAM a block at a
+ * time before they are used, so after a reboot the counter starts above every counter
+ * already sent: no nonce repeats, and Home Assistant's check for a rising counter holds.
+ * If the NVRAM write fails, the next advert tries again. */
+static uint32_t counter_next(void)
+{
+    if (bthome_counter >= bthome_reserved)
+    {
+        nv_counter_t   ctr = { { 'A', 'T' }, bthome_counter + COUNTER_BLOCK };
+        wiced_result_t st;
+        if (wiced_hal_write_nvram(NV_COUNTER, sizeof(ctr), (uint8_t *)&ctr, &st) == sizeof(ctr) &&
+            st == WICED_SUCCESS)
+            bthome_reserved = ctr.next;
+    }
+    return bthome_counter++;
+}
+
+static wiced_bt_gatt_status_t key_write(const uint8_t *v, uint16_t len)
+{
+    static const uint8_t zero[BTHOME_KEY_LEN];
+    nv_key_t       nv;
+    wiced_result_t st;
+    uint16_t       written;
+
+    if (len != BTHOME_KEY_LEN && !(len == 1 && v[0] == 0))
+        return WICED_BT_GATT_INVALID_ATTR_LEN;
+    if (!presence)
+        return WICED_BT_GATT_INSUF_AUTHORIZATION; /* press the button first */
+    if (len == BTHOME_KEY_LEN && memcmp(v, zero, BTHOME_KEY_LEN) == 0)
+        return WICED_BT_GATT_ILLEGAL_PARAMETER;
+    memset(&nv, 0, sizeof(nv));
+    nv.magic[0] = 'A';
+    nv.magic[1] = 'K';
+    nv.on       = len == BTHOME_KEY_LEN;
+    if (nv.on)
+        memcpy(nv.key, v, BTHOME_KEY_LEN);
+    written = wiced_hal_write_nvram(NV_KEY, sizeof(nv), (uint8_t *)&nv, &st);
+    if (written != sizeof(nv) || st != WICED_SUCCESS)
+    {
+        memset(&nv, 0, sizeof(nv));
+        return WICED_BT_GATT_INTERNAL_ERROR;      /* not stored: keep the current key */
+    }
+    memcpy(bthome_key, nv.key, BTHOME_KEY_LEN);
+    bthome_encrypt = nv.on;
+    memset(&nv, 0, sizeof(nv));
+    WICED_BT_TRACE("BTHome encryption %s\n", bthome_encrypt ? "on" : "off");
+    adv_update(0);
+    status_key(bthome_encrypt);
+    return WICED_BT_GATT_SUCCESS;
+}
+
 /* ---- button --------------------------------------------------------------------- */
 static void emit(uint8_t event)
 {
@@ -636,6 +758,7 @@ static void on_button(wiced_bool_t down)
     led_refresh();
     if (down)
     {
+        presence_mark();
         long_fired = WICED_FALSE;
         wiced_stop_timer(&click_timer);
         wiced_start_timer(&long_timer, cfg.long_press_ms);
@@ -698,8 +821,12 @@ static void button_init(void)
     long_fired = btn_down;                        /* on_button(up) then skips the click */
     boot_press = btn_down;                        /* ...and doesn't light the press color */
     wiced_init_timer(&flash_mode_timer, flash_mode_hold, 0, WICED_MILLI_SECONDS_TIMER);
+    wiced_init_timer(&presence_timer, presence_timeout, 0, WICED_SECONDS_TIMER);
     if (boot_press)
+    {
         wiced_start_timer(&flash_mode_timer, FLASH_MODE_HOLD_MS);
+        presence_mark();                          /* the press that powered it up counts too */
+    }
     wiced_start_timer(&poll_timer, BTN_POLL_MS);
 }
 
@@ -732,31 +859,34 @@ static void burst_timeout(uint32_t arg)
         adv_start(adv_low());
 }
 
+/* The advert (31 bytes): flags (3) + BTHome service data (2 + 3 + objects, + 8 when
+ * encrypted) + as much of the name as fits: 15 characters plain, 7 encrypted. */
 static void adv_update(uint8_t button_event)
 {
     wiced_bt_ble_advert_elem_t elem[3];
     uint8_t  flags = BTM_BLE_GENERAL_DISCOVERABLE_FLAG | BTM_BLE_BREDR_NOT_SUPPORTED;
-    uint8_t  svc[11];
+    uint8_t  objs[6];
+    uint8_t  svc[BTHOME_HEADER_LEN + sizeof(objs) + BTHOME_ENC_OVERHEAD];
     uint8_t  n = 0;
     uint16_t name_len = strlen(abtn_name);
+    uint16_t name_max = bthome_encrypt ? NAME_ADV_MAX_ENC : NAME_ADV_MAX;
 
-    svc[n++] = 0xD2; svc[n++] = 0xFC;             /* BTHome UUID 0xFCD2 */
-    svc[n++] = 0x40;                              /* v2, not encrypted, regular interval */
-    svc[n++] = 0x00; svc[n++] = ++bthome_pid;     /* packet id: HA de-duplicates on it */
-    svc[n++] = 0x01; svc[n++] = battery_pct;      /* battery % */
+    objs[n++] = 0x00; objs[n++] = ++bthome_pid;   /* packet id: HA de-duplicates on it */
+    objs[n++] = 0x01; objs[n++] = battery_pct;    /* battery % */
     if (button_event)
     {
-        svc[n++] = 0x3A; svc[n++] = button_event; /* button event */
+        objs[n++] = 0x3A; objs[n++] = button_event; /* button event */
     }
 
     elem[0].advert_type = BTM_BLE_ADVERT_TYPE_FLAG;
     elem[0].len         = 1;
     elem[0].p_data      = &flags;
     elem[1].advert_type = BTM_BLE_ADVERT_TYPE_SERVICE_DATA;
-    elem[1].len         = n;
+    elem[1].len         = bthome_service_data(svc, objs, n, bthome_encrypt ? bthome_key : NULL, local_addr,
+                                              bthome_encrypt ? counter_next() : 0);
     elem[1].p_data      = svc;
-    elem[2].advert_type = name_len > NAME_ADV_MAX ? BTM_BLE_ADVERT_TYPE_NAME_SHORT : BTM_BLE_ADVERT_TYPE_NAME_COMPLETE;
-    elem[2].len         = name_len > NAME_ADV_MAX ? NAME_ADV_MAX : name_len;
+    elem[2].advert_type = name_len > name_max ? BTM_BLE_ADVERT_TYPE_NAME_SHORT : BTM_BLE_ADVERT_TYPE_NAME_COMPLETE;
+    elem[2].len         = name_len > name_max ? name_max : name_len;
     elem[2].p_data      = (uint8_t *)abtn_name;
     wiced_bt_ble_set_raw_advertisement_data(3, elem);
 
@@ -959,7 +1089,7 @@ static wiced_bt_gatt_status_t command_write(const uint8_t *v, uint16_t len)
     case 0x01:                                    /* reboot, after the write response is out */
         wiced_start_timer(&reboot_timer, 300);
         return WICED_BT_GATT_SUCCESS;
-    case 0x02:                                    /* restore defaults */
+    case 0x02:                                    /* restore defaults (the BTHome key stays) */
         cfg = cfg_default;
         cfg_save();
         cfg_apply_adv_interval();
@@ -1008,6 +1138,9 @@ static wiced_bt_gatt_status_t gatt_read(uint16_t conn, wiced_bt_gatt_read_t *p)
         memcpy(led, base_rgb, 3);
         led[3] = user_anim.on;
         return read_value(p, led, sizeof(led));
+    case HDL_ABTN_KEY_VAL:
+        led[0] = bthome_encrypt;                  /* on/off only: the key is never read back */
+        return read_value(p, led, 1);
     }
     return WICED_BT_GATT_INVALID_HANDLE;
 }
@@ -1024,6 +1157,7 @@ static wiced_bt_gatt_status_t gatt_write(uint16_t conn, wiced_bt_gatt_write_t *p
     case HDL_ABTN_CONFIG_VAL: return config_write(p->p_val, p->val_len);
     case HDL_ABTN_NAME_VAL:   return name_write(p->p_val, p->val_len);
     case HDL_ABTN_CMD_VAL:    return command_write(p->p_val, p->val_len);
+    case HDL_ABTN_KEY_VAL:    return key_write(p->p_val, p->val_len);
     }
     return WICED_BT_GATT_WRITE_NOT_PERMIT;
 }
@@ -1114,6 +1248,10 @@ static void app_init(void)
     cfg_load();
     identity_load();                              /* reads NVRAM and the serial flash */
     app_cfg_settings.device_name = (uint8_t *)abtn_name;
+    wiced_bt_dev_read_local_addr(local_addr);     /* part of the BTHome encryption nonce */
+    key_load();
+    DBG("addr %B, BTHome encryption %s, counter %u\n", local_addr, bthome_encrypt ? "on" : "off",
+        (unsigned)bthome_counter);
     DBG("app_init: sleep (never)\n");
     sleep_init();
     WICED_BT_TRACE("AButton %s booting as %s\n", ABTN_FW_VERSION, abtn_name);

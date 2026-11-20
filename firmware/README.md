@@ -15,7 +15,7 @@ with no Echo, Alexa or pairing.
 > **Prebuilt images only take updates signed with the maintainer's key.** The images in
 > [`prebuilt/`](prebuilt/) have the repository maintainer's public key built in, so over the
 > air a button running them accepts **only** updates the maintainer signs (the
-> `.ota.signed` files published here). Firmware 0.2.1 (the prebuilt images) adds a UART
+> `.ota.signed` files published here). Firmware 0.2.1 and later (the prebuilt images) add a UART
 > **flash mode** (hold the button 8 s at power-up) meant to let owners with the test-pad
 > wiring flash their own builds onto a running AButton; it is experimental: the hold and the magenta LED work, flashing over the UART in this mode is not yet tested.
 
@@ -30,6 +30,10 @@ with no Echo, Alexa or pairing.
   `long_double_press`, `long_triple_press`, and battery %. Fast advertising for 2.5 s after
   each event, then at the configured interval (250 ms by default). It keeps advertising
   (non-connectable) while a client is connected, so no press is missed.
+- **Encrypted BTHome** (0.3.0, optional): with a key set, the adverts are encrypted and
+  authenticated (AES-128-CCM, the BTHome bind key), so nobody nearby can read the presses or
+  fake them. Home Assistant's BTHome integration asks for the key. Setting or changing the key
+  only works within 60 s of a press on the button. The key is never readable over BLE.
 - **LED control over BLE** (0.2.0): a steady color and animations (up to 40 steps with
   fades, repeated or looping), from Home Assistant (this repo's integration: a `light`
   entity and `echo_button.play_animation`) or `abutton_ble.py`. The steady color survives
@@ -73,6 +77,12 @@ python3 firmware/abutton_ble.py name     $B "Garage Button"    # "" goes back to
 python3 firmware/abutton_ble.py identify $B                    # three white blinks
 python3 firmware/abutton_ble.py reboot   $B
 python3 firmware/abutton_ble.py defaults $B                    # settings, name and LED back to defaults
+# BTHome encryption (0.3.0+). Press the button once first: key changes need a press in the last 60 s.
+python3 firmware/abutton_ble.py key      $B --generate         # random key: stored, and printed for HA
+python3 firmware/abutton_ble.py key      $B 231d39c1d7cc1ab1aee224cd096db932   # your own key
+python3 firmware/abutton_ble.py key      $B off                # stop encrypting
+python3 firmware/abutton_ble.py key      $B                    # on or off?
+python3 firmware/abutton_ble.py monitor --key 231d39c1d7cc1ab1aee224cd096db932  # decrypt adverts
 ```
 
 `config` with no options prints the current settings. Each command connects, retries if
@@ -193,6 +203,16 @@ Nothing to install: with an ESPHome Bluetooth proxy (or a local adapter) in rang
 Assistant discovers the button through the **BTHome** integration. Presses arrive as
 `event` entities with the event types above, and battery as a sensor.
 
+With encryption on, give Home Assistant the key: when the BTHome integration first sees the
+encrypted adverts it asks for it (a re-authentication notice on the BTHome entry, or the
+prompt when you add the button). A new key needs the same step. Turning encryption off again
+needs the button's BTHome device deleted and added back: once BTHome has a key, it ignores
+unencrypted adverts so they can't be faked.
+
+The encryption counter in each advert keeps rising across restarts (the button reserves
+counters in NVRAM 256 at a time), as BTHome's replay check requires. Restore defaults keeps
+the key.
+
 ## Signing notes
 
 `ota_sign.py` does key generation and signing with `cryptography`. The SDK's own
@@ -207,11 +227,12 @@ verifier's algorithm rebuilt with 32-bit words.
 | File | |
 |---|---|
 | `abutton/abutton.c` | the application: button, LED, BTHome, OTA hooks, sleep policy, identity |
+| `abutton/bthome.c` | BTHome service data and its encryption (AES-128-CCM), host-tested by `tests/test_bthome_crypto.py` |
 | `abutton/wiced_bt_cfg.c` | Bluetooth stack configuration (BLE only, advertising intervals) |
 | `abutton/makefile.mk` | SDK app makefile (secure OTA, `TRACE=1`) |
 | `build.sh`, `check.sh` | build, and the strict compile check |
 | `ota_sign.py` | key generation, the firmware's public-key source, signing, verification |
 | `abutton_image.py` | assemble full flash images, set name/MAC, show identity |
-| `abutton_ble.py` | BTHome monitor, info, LED, animations, settings, name, commands, OTA client |
+| `abutton_ble.py` | BTHome monitor (decrypts with `--key`), info, LED, animations, settings, name, commands, encryption key, OTA client |
 | `GUIDE.md` | wiring, flashing, setup, OTA and recovery, step by step |
 | `prebuilt/` | ready-made AButton images (release and debug, flash and OTA) and the stock firmware |

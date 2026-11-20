@@ -160,13 +160,13 @@ press once and retry.
 
 > **About the signing key.** The prebuilt image trusts only the repository maintainer's key:
 > over the air, the button accepts **only** updates the maintainer signs and publishes here.
-> The prebuilt images (0.2.1) include a UART flash mode (step 6b) meant for flashing your
+> The prebuilt images (0.2.1 and later) include a UART flash mode (step 6b) meant for flashing your
 > own builds onto a running AButton later, but it's untested over the UART so far. To be
 > safe, [build from source](#building-your-own) now and flash your own image here if you
 > want your own key.
 
 ```sh
-python3 research/echobtn_resume_flash.py firmware/prebuilt/abutton-0.2.1.bin \
+python3 research/echobtn_resume_flash.py firmware/prebuilt/abutton-0.3.0.bin \
     --sectors 0x1000,0x4000-0x1e000 --expect-serial <your serial>
 ```
 
@@ -188,7 +188,7 @@ Then take the batteries out for a few seconds, put them back, and **press once**
 blinks green (amber or red if the batteries are low), then stays dark; it lights white while
 the button is held.
 
-**Debug build:** `abutton-0.2.1-dbg.bin` prints a heartbeat, button and battery traces on the
+**Debug build:** `abutton-0.3.0-dbg.bin` prints a heartbeat, button and battery traces on the
 UART (read them with `echobtn_trace.py`). Use it for bring-up; keep the trace reader running
 while it's in use.
 
@@ -256,6 +256,21 @@ Without Home Assistant, `firmware/abutton_ble.py` does the same from a shell (`c
 A unit that was paired with the stock firmware's Classic Bluetooth integration can be removed
 from it; AButton doesn't use Classic Bluetooth.
 
+### Encrypt the presses (0.3.0+)
+
+BTHome adverts are plain by default: anyone nearby can see the presses, and could send fake
+ones to trigger your automations. To encrypt them:
+
+1. **Press the button once.** It only accepts a key change within 60 seconds of a press.
+2. Run `python3 firmware/abutton_ble.py key AA:BB:CC:DD:EE:FF --generate`. The button blinks green
+   twice, and you get the key (32 hex characters). Save it; the button never shows it again.
+3. In Home Assistant, the BTHome integration asks for the key within a minute
+   (Settings → Devices & services). Paste it there.
+
+A new key works the same way. To go back to plain adverts, press the button, turn encryption off
+(two amber blinks), then delete the button's BTHome device in Home Assistant and add it again:
+BTHome ignores unencrypted adverts from a device it has a key for.
+
 ## 6. Update over the air
 
 Once a button runs AButton, **every update goes this way**: no wires, no presses, nothing
@@ -263,7 +278,7 @@ opened. The serial lead is only needed again if a button ends up with bad firmwa
 
 ```sh
 python3 firmware/abutton_ble.py info AA:BB:CC:DD:EE:FF                 # firmware version
-python3 firmware/abutton_ble.py ota  AA:BB:CC:DD:EE:FF firmware/prebuilt/abutton-0.2.1.ota.signed
+python3 firmware/abutton_ble.py ota  AA:BB:CC:DD:EE:FF firmware/prebuilt/abutton-0.3.0.ota.signed
 ```
 
 - About 100 s for 80 KB (0.8 KiB/s). The LED is dim blue during the transfer. The button
@@ -316,7 +331,7 @@ Press when it says `Press the button`, release when it reports the window closed
 about 15 presses for 27 sectors (1–2 sectors fit in each 2 s window). Progress survives between presses. Then take the batteries
 out for a few seconds and press.
 
-IMAGE is `firmware/prebuilt/abutton-0.2.1.bin` (or your own build) for AButton, or your own
+IMAGE is `firmware/prebuilt/abutton-0.3.0.bin` (or your own build) for AButton, or your own
 dump (`dump/sflash.bin`) for stock.
 
 If the flasher says the firmware refuses vendor commands (`0x0C`), the unit runs a working

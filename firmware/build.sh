@@ -36,7 +36,7 @@ fi
 APP=$SDK/apps/abutton
 rm -rf "$APP"
 mkdir -p "$APP"
-cp "$REPO"/firmware/abutton/*.c "$REPO"/firmware/abutton/makefile.mk "$APP/"
+cp "$REPO"/firmware/abutton/*.c "$REPO"/firmware/abutton/*.h "$REPO"/firmware/abutton/makefile.mk "$APP/"
 "$PYTHON" "$REPO/firmware/ota_sign.py" --key "$KEY" pubc -o "$APP/ecdsa256_pub.c"
 
 ( cd "$SDK" && ./make abutton-BCM920735EVAL_QFN60 build TRACE="$TRACE" ABTN_FW_VERSION="$VERSION" )
