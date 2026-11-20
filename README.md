@@ -8,8 +8,7 @@ buzzer from 2017 that Amazon discontinued. This custom integration turns it into
 **toggle switch** with **colored press feedback**, a **controllable RGB LED**, and
 **press / long-press events** for automations.
 
-It talks to the button directly over Classic Bluetooth through your Home Assistant
-host's BlueZ. No Echo, Alexa app or Amazon account is involved, and nothing goes
+It talks to the button directly over Classic Bluetooth through your Home Assistant. No Echo, Alexa app or Amazon account is involved and nothing goes
 through the cloud.
 
 https://github.com/user-attachments/assets/a3f55fe2-0d2b-4031-b9c9-473aa6e054a4
